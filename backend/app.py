@@ -130,8 +130,9 @@ class IngestRequest(BaseModel):
 @app.post("/api/generate", response_model=GenerateResponse)
 def generate(req: GenerateRequest):
     """
-    Phase 2 + Phase 3: scrape the target URL, retrieve relevant CV chunks,
-    and generate a draft email. Does NOT write to the database.
+    Phase 2 + Phase 3: scrape and chunk the target URL, cross-match target
+    chunks against the CV vector store, and generate a draft email.
+    Does NOT write to the database.
     """
     url = req.url.strip()
     role = req.role.strip() if req.role else ""
@@ -147,14 +148,14 @@ def generate(req: GenerateRequest):
         )
 
     try:
-        scraped_text = pipeline.scrape_target_page(url)
+        target_chunks = pipeline.scrape_and_chunk_target_page(url)
     except Exception as exc:
         raise HTTPException(
             status_code=422,
             detail=f"Failed to scrape target page: {exc}",
         )
 
-    org_name = pipeline.extract_org_name(url, scraped_text)
+    org_name = pipeline.extract_org_name(url, target_chunks)
 
     try:
         generated_email = pipeline.generate_email(url, role, PERSIST_DIR)

@@ -6,12 +6,17 @@ Pipeline:
   Phase 1 - Data Ingestion & Embedding: chunk the personal CV/context markdown
             file and embed it into a local, persistent ChromaDB vector store
             using a HuggingFace sentence-transformers model.
-  Phase 2 - Dynamic Web Scraping: pull the live text content of a target
-            company / lab / career page with LangChain's WebBaseLoader.
-  Phase 3 - Retrieval & Generation: run a similarity search against the CV
-            vector store using the scraped page as the query, then feed the
-            retrieved CV chunks + target page content into an LLM through a
-            strict PromptTemplate / LCEL chain to draft a cover email.
+  Phase 2 - Dynamic Web Scraping & Chunking: pull the live text content of
+            a target company / lab / career page with LangChain's
+            WebBaseLoader, then split it into small (~500-char) Documents
+            with RecursiveCharacterTextSplitter so each section of the page
+            (Requirements, Research Areas, etc.) gets its own embedding.
+  Phase 3 - Dual Retrieval & Generation: for each target chunk, run a
+            similarity_search_with_score against the CV ChromaDB; keep only
+            the chunks whose best match score falls below MATCH_THRESHOLD
+            (irrelevant sections like Cookie Policy are discarded).
+            Aggregate and deduplicate the matched CV chunks, then feed the
+            LLM only the matched target segments and matched CV facts.
 
 CRITICAL RULE enforced in the prompt: the model must ONLY use the retrieved
 CV chunks as ground truth about the candidate. It is explicitly instructed
@@ -50,6 +55,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
@@ -70,6 +76,14 @@ LLM_MODEL = "llama-3.3-70b-versatile"
 TOP_K = 5
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 75
+
+# Dual-retrieval (chunk-to-chunk cross-matching) configuration
+TARGET_CHUNK_SIZE    = 500   # chunk size when splitting the scraped target page
+TARGET_CHUNK_OVERLAP = 50    # overlap between consecutive target page chunks
+MATCH_THRESHOLD      = 0.45  # L2 distance ceiling — a target chunk is relevant
+                              # only if its best CV match score < this value
+MAX_CV_CHUNKS        = 8     # max deduplicated CV chunks forwarded to the LLM
+MAX_TARGET_CHUNKS    = 6     # max matched target chunks forwarded to the LLM
 
 # A generic user-agent for WebBaseLoader / urllib so requests aren't blocked
 os.environ.setdefault(
@@ -268,30 +282,59 @@ def load_vectordb(persist_dir: str = PERSIST_DIR) -> Chroma:
     )
 
 # --------------------------------------------------------------------------- #
-# Phase 2: Dynamic Web Scraping
+# Phase 2: Dynamic Web Scraping & Chunking
 # --------------------------------------------------------------------------- #
 
-def scrape_target_page(url: str, max_chars: int = 6000) -> str:
-    """Fetch and lightly clean the live text content of the target page."""
+def scrape_and_chunk_target_page(url: str) -> list[Document]:
+    """
+    Fetch the live text of the target page and split it into small, focused
+    Document chunks (~TARGET_CHUNK_SIZE chars each).
+
+    Returning a list of Documents — rather than a single flat string — is the
+    key architectural change: every section of the page (Requirements, Research
+    Areas, Contact, etc.) now gets its own embedding, enabling the chunk-to-chunk
+    cross-matching in Phase 3 to selectively keep only the relevant sections.
+    """
     print(f"[Phase 2] Scraping target page: {url}")
     loader = WebBaseLoader(url, bs_get_text_kwargs={"separator": " ", "strip": True})
-    docs = loader.load()
+    raw_docs = loader.load()
 
-    text = "\n".join(d.page_content for d in docs)
-    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines() if line.strip()]
-    cleaned = "\n".join(lines)
+    # Light clean-up: collapse whitespace runs and drop empty lines.
+    cleaned_docs: list[Document] = []
+    for doc in raw_docs:
+        lines = [
+            re.sub(r"\s+", " ", line).strip()
+            for line in doc.page_content.splitlines()
+            if line.strip()
+        ]
+        cleaned_text = "\n".join(lines)
+        if cleaned_text.strip():
+            cleaned_docs.append(
+                Document(page_content=cleaned_text, metadata=doc.metadata)
+            )
 
-    if len(cleaned) > max_chars:
-        cleaned = cleaned[:max_chars]
-
-    if not cleaned.strip():
+    if not cleaned_docs:
         raise RuntimeError(
             "Scraped page returned no usable text content. "
             "The site may require JavaScript rendering or block scrapers."
         )
 
-    print(f"[Phase 2] Retrieved {len(cleaned)} characters of target content.")
-    return cleaned
+    # Split the cleaned page into small, focused chunks. Each chunk represents
+    # one semantic segment of the page and will be individually cross-matched
+    # against the CV vector store in Phase 3.
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=TARGET_CHUNK_SIZE,
+        chunk_overlap=TARGET_CHUNK_OVERLAP,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+    target_chunks = splitter.split_documents(cleaned_docs)
+
+    total_chars = sum(len(c.page_content) for c in target_chunks)
+    print(
+        f"[Phase 2] Produced {len(target_chunks)} target chunks "
+        f"({total_chars} total chars) ready for cross-matching."
+    )
+    return target_chunks
 
 
 # --------------------------------------------------------------------------- #
@@ -302,17 +345,14 @@ EMAIL_PROMPT = PromptTemplate(
     input_variables=["target_context", "cv_context", "role", "contact_info"],
     template="""You are an experienced technical hiring manager who also happens
 to write outstanding application emails. You are helping a Computer Engineering
-student draft a SHORT, high-signal summer internship application email —
+student draft a high-signal summer internship application email —
 the kind that actually makes a hiring manager want to reply, not a generic
 cover letter.
 
 CRITICAL RULES (must never be violated):
 1. You may ONLY use facts, skills, and technologies that appear verbatim in the
    "CANDIDATE FACTS" section below. NEVER invent, assume, or exaggerate.
-2. DO NOT mention specific project names or titles from CANDIDATE FACTS. Instead,
-   focus entirely on the core technologies you used, the technical concepts you
-   mastered, and the domain knowledge you acquired (e.g., discuss implementing
-   AI models or building full-stack systems conceptually).
+2. You MUST prioritize AI-related projects and competitions (e.g., TEKNOFEST). You MAY mention specific project and competition names briefly to provide concrete evidence of your skills. Describe specifically what you built and which models/technologies you used (e.g., do not just say "I trained models", name the models and the problem solved if available in facts).
 3. The email MUST start with a professional greeting (e.g., "Dear Hiring Committee,"
    or "Dear [Team/Lab Name],").
 4. You MUST explicitly state that you are applying for a "summer internship".
@@ -327,32 +367,31 @@ CRITICAL RULES (must never be violated):
 
 CONTENT PRIORITY (this is what makes the email good, follow it strictly):
 - Lead with ONE specific, concrete reason their exact work/research (drawn only 
-  from TARGET CONTEXT) aligns with your interests. Show genuine curiosity and 
-  enthusiasm for their ongoing studies.
-- Highlight the MOST RELEVANT technical concepts and frameworks you know (from 
-  CANDIDATE FACTS) that match the target's field. Explain what you built conceptually 
-  to prove your competence, without dropping project names.
+  from TARGET CONTEXT) aligns with your interests. Show genuine curiosity for their defense/aerospace/AI focus.
+- Highlight the MOST RELEVANT technical concepts, competitions, and frameworks you know (from 
+  CANDIDATE FACTS) that match the target's field. 
+- Always include a brief mention of the "42 Piscine" or 42 Istanbul experience (if present in facts) to highlight your rigorous foundational programming and C/C++ skills, which are highly relevant.
 - Include one genuine, specific sentence demonstrating what you want to LEARN 
-  from their team's specific expertise. Be curious and specific to their domain, 
-  not a vague "eager to learn" line.
+  from their team's specific expertise. Be curious and specific to their domain.
 - Certificates, GPA, and course/workshop names are LOW priority. Cut anything 
   that does not serve the points above.
 
 STYLE:
-- Total length: 130-180 words for the body (excluding subject line and
-  signature). Shorter and sharper beats longer and thorough.
+- Total length: 180-230 words for the body (excluding subject line and
+  signature). We want slightly more detail but still punchy.
 - Plain, direct, confident sentences. No filler phrases like "I believe I can
   contribute and learn" or similar generic cover-letter boilerplate.
-- Structure: A formal greeting, no more than 3 short paragraphs, a brief closing 
+- Structure: A formal greeting, 3-4 short paragraphs, a brief closing 
   line (including the insurance note), and the signature.
 
-TARGET CONTEXT (scraped live from the target organization's page):
+TARGET CONTEXT (only the sections of the target page that matched the
+candidate's background — irrelevant sections have been filtered out):
 ---
 {target_context}
 ---
 
-CANDIDATE FACTS (retrieved from the candidate's verified CV/background,
-top {top_k} most relevant chunks):
+CANDIDATE FACTS (retrieved from the candidate's verified CV/background —
+only the chunks that matched the target page's content):
 ---
 {cv_context}
 ---
@@ -367,28 +406,134 @@ target context without fabricating specifics): {role}
 
 Write the complete application email now, in English, starting with a
 subject line formatted as: "Subject: ...".
-""".replace("{top_k}", str(TOP_K)),
+""",
 )
  
 
-def format_retrieved_docs(docs) -> str:
-    return "\n\n".join(f"[CV Chunk {i+1}]\n{d.page_content}" for i, d in enumerate(docs))
-
-
-def build_generation_chain(vectordb: Chroma, role: str, contact_info_text: str):
-    """LCEL chain: scraped_text -> retrieve CV chunks -> prompt -> LLM -> str."""
-    retriever = vectordb.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": TOP_K, "fetch_k": 12, "lambda_mult": 0.6},
+def format_target_chunks(chunks: list[Document]) -> str:
+    """Format matched target-page chunks for the LLM prompt."""
+    return "\n\n".join(
+        f"[Target Chunk {i+1}]\n{c.page_content}" for i, c in enumerate(chunks)
     )
+
+
+def format_cv_chunks(chunks: list[Document]) -> str:
+    """Format matched CV chunks for the LLM prompt."""
+    return "\n\n".join(
+        f"[CV Chunk {i+1}]\n{c.page_content}" for i, c in enumerate(chunks)
+    )
+
+
+def cross_match_chunks(
+    target_chunks: list[Document],
+    vectordb: Chroma,
+) -> tuple[list[Document], list[Document]]:
+    """
+    Phase 3a — Chunk-to-Chunk Cross-Matching.
+
+    Algorithm:
+      For each target_chunk (a section of the scraped career/lab page):
+        1. Run similarity_search_with_score against the CV vector store (k=3).
+           Chroma returns (Document, L2_distance) pairs — LOWER score = CLOSER.
+        2. If the best (minimum) score < MATCH_THRESHOLD, the target chunk is
+           deemed relevant (e.g., "Requirements" matching a "Projects" CV chunk).
+        3. Relevant target chunks are kept; irrelevant ones (Cookie Policy, legal
+           text, navigation menus, etc.) are silently discarded.
+        4. All CV chunks surfaced by matched target chunks are pooled and
+           deduplicated by page_content, preserving insertion order.
+
+    Fallback: if zero target chunks pass the threshold (very sparse page or
+    too strict a threshold), the 3 closest target chunks are used instead and
+    a warning is printed so you can lower MATCH_THRESHOLD.
+
+    Returns:
+        matched_target_chunks : target page segments aligned with the CV
+        deduplicated_cv_chunks: unique CV chunks matched by ≥1 target chunk
+    """
+    matched_target_chunks: list[Document] = []
+    # Dict keyed on page_content to deduplicate while preserving insertion order.
+    cv_chunk_pool: dict[str, Document] = {}
+
+    for t_chunk in target_chunks:
+        query_text = t_chunk.page_content
+
+        # Retrieve the top-3 CV chunks most similar to this target chunk.
+        results = vectordb.similarity_search_with_score(query_text, k=3)
+
+        if not results:
+            continue
+
+        # Lower L2 distance = better match. Keep the best (minimum) score.
+        best_score = min(score for _, score in results)
+
+        if best_score < MATCH_THRESHOLD:
+            # This target chunk aligns with something real in the CV — keep it.
+            matched_target_chunks.append(t_chunk)
+
+            # Harvest all CV chunks from this match into the deduplication pool.
+            for cv_doc, _ in results:
+                key = cv_doc.page_content
+                if key not in cv_chunk_pool:
+                    cv_chunk_pool[key] = cv_doc
+
+    # Enforce caps so the final prompt stays within a reasonable token budget.
+    matched_target_chunks = matched_target_chunks[:MAX_TARGET_CHUNKS]
+    deduplicated_cv_chunks = list(cv_chunk_pool.values())[:MAX_CV_CHUNKS]
+
+    print(
+        f"[Phase 3] Cross-match: {len(matched_target_chunks)}/{len(target_chunks)} "
+        f"target chunks matched | {len(deduplicated_cv_chunks)} unique CV chunks collected."
+    )
+
+    # --- Fallback: threshold may be too strict for this particular page ---
+    if not matched_target_chunks:
+        print(
+            f"[Phase 3] WARNING: No target chunks passed MATCH_THRESHOLD={MATCH_THRESHOLD}. "
+            "Falling back to the 3 closest target chunks. Consider lowering the threshold."
+        )
+        # Score every target chunk and keep the 3 with the lowest distance.
+        scored: list[tuple[Document, float]] = []
+        for t_chunk in target_chunks:
+            results = vectordb.similarity_search_with_score(t_chunk.page_content, k=1)
+            if results:
+                scored.append((t_chunk, results[0][1]))
+        scored.sort(key=lambda x: x[1])
+        matched_target_chunks = [c for c, _ in scored[:3]]
+
+        # Refill the CV pool from the fallback chunks.
+        for t_chunk in matched_target_chunks:
+            for cv_doc, _ in vectordb.similarity_search_with_score(
+                t_chunk.page_content, k=3
+            ):
+                key = cv_doc.page_content
+                if key not in cv_chunk_pool:
+                    cv_chunk_pool[key] = cv_doc
+        deduplicated_cv_chunks = list(cv_chunk_pool.values())[:MAX_CV_CHUNKS]
+        print(
+            f"[Phase 3] Fallback: using {len(matched_target_chunks)} target chunks "
+            f"and {len(deduplicated_cv_chunks)} CV chunks."
+        )
+
+    return matched_target_chunks, deduplicated_cv_chunks
+
+
+def build_generation_chain(role: str, contact_info_text: str):
+    """
+    LCEL chain: {target_context, cv_context} -> prompt -> LLM -> str.
+
+    The retriever has been removed from this chain. Retrieval and cross-matching
+    now happen explicitly in cross_match_chunks() before this chain is invoked,
+    so this function is a pure generation step that receives pre-formatted strings.
+    """
     llm = ChatGroq(model=LLM_MODEL, temperature=0.4)
 
     chain = (
         {
-            "target_context": RunnablePassthrough(),
-            "cv_context": retriever | RunnableLambda(format_retrieved_docs),
-            "role": RunnableLambda(lambda _: role or "Not specified"),
-            "contact_info": RunnableLambda(lambda _: contact_info_text),
+            # Both context strings are injected as pre-computed values.
+            "target_context": RunnableLambda(lambda x: x["target_context"]),
+            "cv_context":     RunnableLambda(lambda x: x["cv_context"]),
+            "role":           RunnableLambda(lambda _: role or "Not specified"),
+            "contact_info":   RunnableLambda(lambda _: contact_info_text),
         }
         | EMAIL_PROMPT
         | llm
@@ -398,9 +543,18 @@ def build_generation_chain(vectordb: Chroma, role: str, contact_info_text: str):
 
 
 def generate_email(url: str, role: str, persist_dir: str = PERSIST_DIR) -> str:
-    scraped_text = scrape_target_page(url)
+    """
+    Full pipeline orchestrator:
+      Phase 2 → scrape & chunk the target page
+      Phase 3a → cross-match chunks against the CV vector store
+      Phase 3b → generate the email from matched context only
+    """
+    # --- Phase 2: scrape and chunk the target page ---
+    target_chunks = scrape_and_chunk_target_page(url)
+
     vectordb = load_vectordb(persist_dir)
 
+    # --- Load contact info (always needed for the email signature) ---
     contact_file = contact_info_path(persist_dir)
     if not contact_file.exists():
         raise RuntimeError(
@@ -417,9 +571,19 @@ def generate_email(url: str, role: str, persist_dir: str = PERSIST_DIR) -> str:
     ]
     contact_info_text = "\n".join(l for l in contact_lines if l.split(": ", 1)[1])
 
-    print(f"[Phase 3] Retrieving top {TOP_K} relevant CV chunks and generating email...")
-    chain = build_generation_chain(vectordb, role, contact_info_text)
-    email = chain.invoke(scraped_text)
+    # --- Phase 3a: cross-match each target chunk against the CV vector store ---
+    matched_targets, matched_cv = cross_match_chunks(target_chunks, vectordb)
+
+    # --- Phase 3b: generate the email from matched context only ---
+    print(
+        f"[Phase 3] Generating email with "
+        f"{len(matched_targets)} target chunk(s) + {len(matched_cv)} CV chunk(s)..."
+    )
+    chain = build_generation_chain(role, contact_info_text)
+    email = chain.invoke({
+        "target_context": format_target_chunks(matched_targets),
+        "cv_context":     format_cv_chunks(matched_cv),
+    })
     return email
 
 
