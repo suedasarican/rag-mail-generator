@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
-from fastapi import Depends, FastAPI, HTTPException, BackgroundTasks
+from fastapi import Depends, FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy.orm import Session
@@ -172,6 +172,36 @@ def generate(req: GenerateRequest):
         generated_email=generated_email,
         organization_name=org_name,
         url=url,
+        role=role or None,
+    )
+
+@app.post("/api/generate-from-image", response_model=GenerateResponse)
+async def generate_from_image(file: UploadFile = File(...), role: Optional[str] = Form(None)):
+    """
+    Multimodal RAG: extracts text from an uploaded poster image via Vision LLM,
+    chunks it, cross-matches against the CV, and generates an email.
+    """
+    image_bytes = await file.read()
+    role = role.strip() if role else ""
+
+    if not Path(PERSIST_DIR).exists():
+        raise HTTPException(
+            status_code=409,
+            detail="CV vector store not found. Please run POST /api/ingest first.",
+        )
+
+    try:
+        generated_email = pipeline.generate_email_from_image(image_bytes, role, PERSIST_DIR)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Email generation failed: {exc}",
+        )
+
+    return GenerateResponse(
+        generated_email=generated_email,
+        organization_name="Extracted from Image",
+        url="Image Upload",
         role=role or None,
     )
 

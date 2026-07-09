@@ -51,6 +51,7 @@ import json
 import os
 import re
 import sys
+import base64
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -58,6 +59,7 @@ from dotenv import load_dotenv
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import TextLoader, WebBaseLoader
@@ -315,27 +317,32 @@ def scrape_and_chunk_target_page(url: str) -> list[Document]:
 
     if not cleaned_docs:
         raise RuntimeError(
-            "Scraped page returned no usable text content. "
-            "The site may require JavaScript rendering or block scrapers."
-        )
+            "Scraped page returned no usable text content. ")
+    try:
+        loader = WebBaseLoader(url)
+        docs = loader.load()
+        full_text = "\n".join(d.page_content for d in docs)
+    except Exception as e:
+        print(f"[Phase 2] WARNING: Failed to scrape {url}: {e}")
+        full_text = ""
 
-    # Split the cleaned page into small, focused chunks. Each chunk represents
-    # one semantic segment of the page and will be individually cross-matched
-    # against the CV vector store in Phase 3.
+    return chunk_target_text(full_text)
+
+def chunk_target_text(text: str) -> list[Document]:
+    """Splits raw target text into smaller Document chunks."""
+    # Split text into chunks so each piece has its own embedding vector.
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=TARGET_CHUNK_SIZE,
         chunk_overlap=TARGET_CHUNK_OVERLAP,
-        separators=["\n\n", "\n", ". ", " ", ""],
+        separators=["\n\n", "\n", ".", " ", ""],
     )
-    target_chunks = splitter.split_documents(cleaned_docs)
+    chunks = splitter.create_documents([text])
 
-    total_chars = sum(len(c.page_content) for c in target_chunks)
     print(
-        f"[Phase 2] Produced {len(target_chunks)} target chunks "
-        f"({total_chars} total chars) ready for cross-matching."
+        f"[Phase 2] Produced {len(chunks)} target chunks "
+        f"({sum(len(c.page_content) for c in chunks)} total chars) ready for cross-matching."
     )
-    return target_chunks
-
+    return chunks
 
 def extract_org_name(url: str, target_chunks: list[Document]) -> str:
     """
@@ -731,6 +738,73 @@ def generate_email(url: str, role: str, persist_dir: str = PERSIST_DIR) -> str:
     matched_targets, matched_cv = cross_match_chunks(target_chunks, vectordb)
 
     # --- Phase 3b: generate the email from matched context only ---
+    print(
+        f"[Phase 3] Generating email with "
+        f"{len(matched_targets)} target chunk(s) + {len(matched_cv)} CV chunk(s)..."
+    )
+    chain = build_generation_chain(role, contact_info_text)
+    email = chain.invoke({
+        "target_context": format_target_chunks(matched_targets),
+        "cv_context":     format_cv_chunks(matched_cv),
+    })
+    return email
+
+def extract_text_from_image(image_bytes: bytes) -> str:
+    """Uses Google's Gemini vision model to extract job requirements and culture from an image."""
+    base64_img = base64.b64encode(image_bytes).decode("utf-8")
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    
+    llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.1)
+    
+    prompt_text = (
+        "You are an expert HR analyst. This is an image of a job or internship posting. "
+        "Extract the company name, the required technical skills, and the cultural vibe of the company. "
+        "Output this as a clean, structured Markdown text."
+    )
+    
+    msg = HumanMessage(
+        content=[
+            {"type": "text", "text": prompt_text},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}},
+        ]
+    )
+    
+    response = llm.invoke([msg])
+    content = response.content
+    if isinstance(content, list):
+        # Join text parts if it's a list of dicts/blocks
+        text_parts = [
+            part["text"] if isinstance(part, dict) and "text" in part else str(part)
+            for part in content
+        ]
+        return "\n".join(text_parts)
+    return str(content)
+
+def generate_email_from_image(image_bytes: bytes, role: str, persist_dir: str = PERSIST_DIR) -> str:
+    """
+    Full pipeline orchestrator using an image poster instead of a URL.
+    """
+    extracted_text = extract_text_from_image(image_bytes)
+    print(f"[Phase 2] Vision model extracted {len(extracted_text)} chars from image.")
+    target_chunks = chunk_target_text(extracted_text)
+    
+    vectordb = load_vectordb(persist_dir)
+
+    contact_file = contact_info_path(persist_dir)
+    if not contact_file.exists():
+        raise RuntimeError("No contact_info.json found.")
+    contact = json.loads(contact_file.read_text(encoding="utf-8"))
+    contact_lines = [
+        f"Name: {contact.get('name', '')}",
+        f"Email: {contact.get('email', '')}",
+        f"Phone: {contact.get('phone', '')}",
+        f"LinkedIn: {contact.get('linkedin', '')}",
+        f"GitHub: {contact.get('github', '')}",
+    ]
+    contact_info_text = "\n".join(l for l in contact_lines if l.split(": ", 1)[1])
+
+    matched_targets, matched_cv = cross_match_chunks(target_chunks, vectordb)
+
     print(
         f"[Phase 3] Generating email with "
         f"{len(matched_targets)} target chunk(s) + {len(matched_cv)} CV chunk(s)..."

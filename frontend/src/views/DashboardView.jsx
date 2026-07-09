@@ -13,7 +13,7 @@ import {
   Globe, Briefcase, User, Sparkles, Loader2,
   CheckCircle2, Copy, Eye, Trash2, Pencil,
   RefreshCw, BookOpen, Zap, Database,
-  AlertTriangle, Check, History as HistoryIcon, Mail,
+  AlertTriangle, Check, History as HistoryIcon, Mail, Image, UploadCloud,
 } from "lucide-react";
 import { api } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
@@ -65,7 +65,9 @@ function InputField({ id, label, placeholder, value, onChange, icon: Icon, type 
 export function DashboardView({ onSaved }) {
 
   // Form state
+  const [inputMode, setInputMode] = useState("url"); // "url" | "image"
   const [url,  setUrl]  = useState("");
+  const [imageFile, setImageFile] = useState(null);
   const [role, setRole] = useState("");
 
   // Generation state
@@ -105,7 +107,9 @@ export function DashboardView({ onSaved }) {
 
   // ── Generate ──
   async function handleGenerate() {
-    if (!url.trim()) return;
+    if (inputMode === "url" && !url.trim()) return;
+    if (inputMode === "image" && !imageFile) return;
+
     setLoading(true);
     setError(null);
     setSavedFeedback(null);
@@ -114,12 +118,13 @@ export function DashboardView({ onSaved }) {
     setOrgName("");
     setCulture(null);
     try {
-      const result = await api.generate(url.trim(), role.trim() || null);
+      const result = inputMode === "url" 
+        ? await api.generate(url.trim(), role.trim() || null)
+        : await api.generateFromImage(imageFile, role.trim() || null);
+        
       setDraft(result);
       setEmailText(result.generated_email);
       setOrgName(result.organization_name || "");
-      // Detect culture from the email content (heuristic based on generated text,
-      // the backend logs it — we just show the routing label if detectable)
       if (result.culture) setCulture(result.culture);
     } catch (err) {
       setError(err.message);
@@ -212,16 +217,71 @@ export function DashboardView({ onSaved }) {
           </div>
 
           <div className="space-y-4">
-            <InputField
-              id="target-url"
-              label="Target Organization URL"
-              placeholder="https://example-lab.edu/careers"
-              value={url}
-              onChange={setUrl}
-              icon={Globe}
-              type="url"
-              disabled={loading}
-            />
+            
+            {/* Input Mode Toggle */}
+            <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
+              <button
+                onClick={() => setInputMode("url")}
+                className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${
+                  inputMode === "url" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Globe size={15} /> URL
+              </button>
+              <button
+                onClick={() => setInputMode("image")}
+                className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${
+                  inputMode === "image" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Image size={15} /> Upload Poster
+              </button>
+            </div>
+
+            {inputMode === "url" ? (
+              <InputField
+                id="target-url"
+                label="Target Organization URL"
+                placeholder="https://example-lab.edu/careers"
+                value={url}
+                onChange={setUrl}
+                icon={Globe}
+                type="url"
+                disabled={loading}
+              />
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Target Organization Poster
+                </label>
+                <div 
+                  className={`relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl transition-all ${
+                    imageFile ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                  }`}
+                >
+                  <input 
+                    type="file" 
+                    accept="image/*"
+                    disabled={loading}
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) setImageFile(e.target.files[0]);
+                    }}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" 
+                  />
+                  {imageFile ? (
+                    <div className="flex flex-col items-center gap-2 pointer-events-none">
+                      <CheckCircle2 className="text-blue-500" size={24} />
+                      <span className="text-sm font-medium text-slate-700">{imageFile.name}</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 pointer-events-none text-slate-400">
+                      <UploadCloud size={28} />
+                      <span className="text-sm">Click or drag image to upload</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <InputField
               id="role-input"
               label="Target Internship Role"
@@ -246,7 +306,7 @@ export function DashboardView({ onSaved }) {
             <button
               id="generate-btn"
               onClick={handleGenerate}
-              disabled={loading || !url.trim()}
+              disabled={loading || (inputMode === "url" ? !url.trim() : !imageFile)}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold
                          bg-blue-600 text-white shadow-sm hover:bg-blue-700
                          disabled:opacity-50 disabled:cursor-not-allowed transition-all"

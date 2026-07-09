@@ -59,7 +59,9 @@ RAG_Mail/
 
 - **Python 3.10+**
 - **Node.js 18+**
-- A `.env` file at the project root with `GROQ_API_KEY=your_key_here`
+- A `.env` file at the project root with your API keys:
+  - `GROQ_API_KEY=...` (For generating text via Llama-3.3-70b)
+  - `GOOGLE_API_KEY=...` (For extracting text from uploaded images via Gemini)
 - Your `cv_context.md` file ready to be ingested.
 
 ---
@@ -71,6 +73,7 @@ RAG_Mail/
 ```bash
 cd backend
 pip install -r requirements.txt
+pip install python-multipart langchain-google-genai # For image uploads and vision model
 uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 *API running at `http://localhost:8000` (Swagger docs at `/docs`)*
@@ -121,7 +124,8 @@ curl -X POST http://localhost:8000/api/ingest
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GROQ_API_KEY` | Yes | Groq API key for the LLM (llama-3.3-70b-versatile) |
+| `GROQ_API_KEY` | Yes | Groq API key for the LLM text generation |
+| `GOOGLE_API_KEY` | Yes | Google Gemini API key for image extraction (Multimodal RAG) |
 | `DB_PATH` | No | Custom path for SQLite DB (default: `backend/applications.db`) |
 
 ---

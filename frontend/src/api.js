@@ -26,6 +26,25 @@ export const api = {
   generate: (url, role) =>
     request("POST", "/api/generate", { url, role: role || null }),
 
+  generateFromImage: async (file, role) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (role) formData.append("role", role);
+    
+    const res = await fetch(`${BASE}/api/generate-from-image`, {
+      method: "POST",
+      body: formData,
+    });
+    
+    if (res.status === 204) return null;
+    const json = await res.json().catch(() => ({ detail: res.statusText }));
+    if (!res.ok) {
+      const msg = json?.detail || `HTTP ${res.status}`;
+      throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    }
+    return json;
+  },
+
   saveApplication: (data) =>
     request("POST", "/api/applications", data),
 
