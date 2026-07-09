@@ -4,7 +4,7 @@ A local full-stack AI agent that automates the generation of highly personalized
 
 ---
 
-## 🚀 Key Features & Architecture
+## Key Features & Architecture
 
 ### 1. Agentic Routing (Semantic Routing)
 The system employs a 2-step agentic process to ensure the tone of the email perfectly matches the target organization:
@@ -20,13 +20,13 @@ Instead of embedding an entire massive web page as a single noisy query, the pip
 ### 3. Modern Enterprise Dashboard
 A clean, professional React frontend built with Tailwind CSS and Lucide icons.
 *   **Widget A (Generator):** Enter a target URL and role to kick off the pipeline.
-*   **Widget B (CV Context Status):** Real-time feedback on your CV ingestion status, matching logic, and the detected routing culture (e.g., `🤖 Routed to: CORPORATE`).
+*   **Widget B (CV Context Status):** Real-time feedback on your CV ingestion status, matching logic, and the detected routing culture (e.g., `Routed to: CORPORATE`).
 *   **Widget C (Email Editor):** Review, edit, copy, and save your AI-generated drafts.
 *   **Widget D (Application History):** Track all past applications, filter by status (Draft, Sent, Responded, etc.), edit saved entries, and delete old records.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 RAG_Mail/
@@ -55,7 +55,7 @@ RAG_Mail/
 
 ---
 
-## 🛠️ Prerequisites
+## Prerequisites
 
 - **Python 3.10+**
 - **Node.js 18+**
@@ -64,7 +64,7 @@ RAG_Mail/
 
 ---
 
-## 🚦 Quick Start
+## Quick Start
 
 ### 1. Install Backend Dependencies & Start Server
 
@@ -86,7 +86,7 @@ npm run dev
 
 ---
 
-## 🧠 First-Time Setup (Ingesting CV)
+## First-Time Setup (Ingesting CV)
 
 Before generating emails, you must ingest your CV to build the ChromaDB vector store.
 
@@ -102,7 +102,7 @@ curl -X POST http://localhost:8000/api/ingest
 
 ---
 
-## 🔌 API Reference
+## API Reference
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -117,7 +117,7 @@ curl -X POST http://localhost:8000/api/ingest
 
 ---
 
-## ⚙️ Environment Variables
+## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -126,6 +126,6 @@ curl -X POST http://localhost:8000/api/ingest
 
 ---
 
-## 📝 Notes
+## Notes
 *   The SQLite database (`backend/applications.db`) is automatically created on first use.
 *   The pipeline relies heavily on the quality of the scraped text. Highly JavaScript-dependent sites blocking standard scrapers may result in limited target context.
