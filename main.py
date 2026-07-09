@@ -338,52 +338,34 @@ def scrape_and_chunk_target_page(url: str) -> list[Document]:
 
 
 # --------------------------------------------------------------------------- #
-# Phase 3: Retrieval & Generation
+# Phase 3: Retrieval & Generation — Agentic Routing
 # --------------------------------------------------------------------------- #
- 
-EMAIL_PROMPT = PromptTemplate(
-    input_variables=["target_context", "cv_context", "role", "contact_info"],
-    template="""You are an experienced technical hiring manager who also happens
-to write outstanding application emails. You are helping a Computer Engineering
-student draft a high-signal summer internship application email —
-the kind that actually makes a hiring manager want to reply, not a generic
-cover letter.
 
+# ── Shared building blocks ───────────────────────────────────────────────────
+# These text blocks are reused verbatim across every persona prompt so that
+# the rules and context-injection logic stay in one place.
+
+_CRITICAL_RULES = """\
 CRITICAL RULES (must never be violated):
 1. You may ONLY use facts, skills, and technologies that appear verbatim in the
    "CANDIDATE FACTS" section below. NEVER invent, assume, or exaggerate.
-2. You MUST prioritize AI-related projects and competitions (e.g., TEKNOFEST). You MAY mention specific project and competition names briefly to provide concrete evidence of your skills. Describe specifically what you built and which models/technologies you used (e.g., do not just say "I trained models", name the models and the problem solved if available in facts).
+2. You MUST prioritize AI-related projects and competitions (e.g., TEKNOFEST).
+   You MAY mention specific project and competition names briefly to provide
+   concrete evidence of your skills. Name the models and the problem solved
+   (e.g., XGBoost for imbalanced classification) if present in CANDIDATE FACTS.
 3. The email MUST start with a professional greeting (e.g., "Dear Hiring Committee,"
    or "Dear [Team/Lab Name],").
 4. You MUST explicitly state that you are applying for a "summer internship".
-5. You MUST include this exact logistical detail near the closing of the email: 
+5. You MUST include this exact sentence near the closing of the email:
    "Please note that my mandatory internship insurance will be fully covered by my university."
 6. Do not invent the name of a hiring manager, a specific team, or any detail
    about the target organization that is not present in "TARGET CONTEXT".
 7. The email signature MUST use the exact name, email, phone, LinkedIn, and
    GitHub given in "CONTACT INFO" below, verbatim. NEVER write a placeholder
    like "[Your Name]". Include all of them in the sign-off, each on its own line.
-8. Output ONLY the email (with a subject line), no extra commentary.
+8. Output ONLY the email (with a subject line), no extra commentary."""
 
-CONTENT PRIORITY (this is what makes the email good, follow it strictly):
-- Lead with ONE specific, concrete reason their exact work/research (drawn only 
-  from TARGET CONTEXT) aligns with your interests. Show genuine curiosity for their defense/aerospace/AI focus.
-- Highlight the MOST RELEVANT technical concepts, competitions, and frameworks you know (from 
-  CANDIDATE FACTS) that match the target's field. 
-- Always include a brief mention of the "42 Piscine" or 42 Istanbul experience (if present in facts) to highlight your rigorous foundational programming and C/C++ skills, which are highly relevant.
-- Include one genuine, specific sentence demonstrating what you want to LEARN 
-  from their team's specific expertise. Be curious and specific to their domain.
-- Certificates, GPA, and course/workshop names are LOW priority. Cut anything 
-  that does not serve the points above.
-
-STYLE:
-- Total length: 180-230 words for the body (excluding subject line and
-  signature). We want slightly more detail but still punchy.
-- Plain, direct, confident sentences. No filler phrases like "I believe I can
-  contribute and learn" or similar generic cover-letter boilerplate.
-- Structure: A formal greeting, 3-4 short paragraphs, a brief closing 
-  line (including the insurance note), and the signature.
-
+_CONTEXT_BLOCK = """\
 TARGET CONTEXT (only the sections of the target page that matched the
 candidate's background — irrelevant sections have been filtered out):
 ---
@@ -405,10 +387,122 @@ TARGET ROLE (if provided by the user, otherwise infer cautiously from the
 target context without fabricating specifics): {role}
 
 Write the complete application email now, in English, starting with a
-subject line formatted as: "Subject: ...".
-""",
+subject line formatted as: "Subject: ..."."""
+
+# ── Step 1: Classifier prompt ────────────────────────────────────────────────
+
+ROUTER_PROMPT = PromptTemplate(
+    input_variables=["target_context"],
+    template="""You are an expert corporate analyst. Read the following text
+scrapped from a target organization's website and classify the organization
+into EXACTLY ONE of the following three categories:
+
+1. ACADEMIC  : University labs, research centers, scientific institutes,
+               academia-adjacent non-profits.
+2. STARTUP   : Fast-paced tech startups, software houses, e-commerce platforms,
+               early-to-mid-stage product companies.
+3. CORPORATE : Large enterprises, defense industry, aerospace, government
+               contractors, robust engineering firms.
+
+Output ONLY the category name (ACADEMIC, STARTUP, or CORPORATE).
+No other text, no punctuation, no explanation.
+
+TARGET CONTEXT:
+{target_context}""",
 )
- 
+
+# ── Step 2: Three persona-specific generation prompts ────────────────────────
+
+ACADEMIC_PROMPT = PromptTemplate(
+    input_variables=["target_context", "cv_context", "role", "contact_info"],
+    template=f"""You are an experienced academic hiring coordinator helping a
+Computer Engineering student draft a high-signal summer internship application
+email for a university lab or research centre.
+
+{_CRITICAL_RULES}
+
+CONTENT PRIORITY (ACADEMIC LAB FOCUS — follow strictly):
+- Open with ONE specific reason their published research or lab focus (from
+  TARGET CONTEXT) intersects with your own interests — show you actually read
+  their work, not just their homepage.
+- Emphasise your research-oriented skills: algorithm design, ML model
+  experimentation (e.g., CTGAN for class-imbalance, deep-learning pipelines),
+  data analysis, and methodical problem-solving.
+- If relevant, briefly name a specific competition or project (e.g., TEKNOFEST)
+  to anchor your technical claims to concrete outcomes.
+- Close with ONE genuine sentence about what you want to learn from this lab's
+  specific domain expertise — be precise, not vague.
+- Certificates, GPA, and workshop names are LOW priority unless directly
+  relevant to the lab's research.
+
+STYLE:
+- 180-230 words for the body (excluding subject line and signature).
+- Scholarly, respectful, and deeply curious tone.
+- 3-4 focused paragraphs; formal greeting; brief closing with the insurance note.
+
+{_CONTEXT_BLOCK}""",
+)
+
+STARTUP_PROMPT = PromptTemplate(
+    input_variables=["target_context", "cv_context", "role", "contact_info"],
+    template=f"""You are a seasoned startup recruiter helping a Computer
+Engineering student draft a high-signal summer internship application email
+for a fast-paced tech startup or software house.
+
+{_CRITICAL_RULES}
+
+CONTENT PRIORITY (STARTUP FOCUS — follow strictly):
+- Lead with ONE specific reason their product, stack, or market focus (from
+  TARGET CONTEXT) excites you — make it concrete, not generic enthusiasm.
+- Highlight your ability to ship: full-stack development (React, ASP.NET Core),
+  database design, end-to-end system integration, and real-world project impact.
+- Frame the 42 Piscine / 42 Istanbul experience (if present in CANDIDATE FACTS)
+  as proof of rapid learning, self-direction, and grit under pressure.
+- Mention any AI/ML work (e.g., TEKNOFEST competitions) to show you bring
+  more than just CRUD skills.
+- Close with ONE sentence about what you want to build or learn alongside
+  their specific team — keep it product-focused.
+- Certificates, GPA, and course names are LOW priority.
+
+STYLE:
+- 180-230 words for the body (excluding subject line and signature).
+- Energetic, action-oriented, direct, and concise tone — no fluff.
+- 3-4 tight paragraphs; strong opening; brief closing with the insurance note.
+
+{_CONTEXT_BLOCK}""",
+)
+
+CORPORATE_PROMPT = PromptTemplate(
+    input_variables=["target_context", "cv_context", "role", "contact_info"],
+    template=f"""You are a senior technical recruiter at a large engineering
+firm helping a Computer Engineering student draft a high-signal summer
+internship application email for a corporate, defense, or aerospace employer.
+
+{_CRITICAL_RULES}
+
+CONTENT PRIORITY (CORPORATE / DEFENSE / AEROSPACE FOCUS — follow strictly):
+- Open with ONE specific reason their engineering domain or ongoing programme
+  (from TARGET CONTEXT) aligns with your skills — reference their actual work.
+- Emphasise scale, reliability, and rigorous engineering: highlight specific
+  ML models used in high-stakes contexts (XGBoost, deep-learning pipelines
+  tuned for variance/overfitting) and any competition results (TEKNOFEST).
+- Explicitly reference the 42 Piscine / 42 Istanbul experience (if present in
+  CANDIDATE FACTS): frame it as proof of strong C/C++ foundational skills,
+  Linux environments, and software-engineering discipline.
+- Highlight any relevant autonomous-systems, embedded, or low-level programming
+  experience from CANDIDATE FACTS.
+- Close with ONE sentence about the specific technical expertise you want to
+  develop within their engineering environment.
+- Certificates, GPA, and workshop names are LOW priority.
+
+STYLE:
+- 180-230 words for the body (excluding subject line and signature).
+- Highly formal, structured, and engineering-driven tone — precise language.
+- 3-4 substantive paragraphs; formal greeting; brief closing with insurance note.
+
+{_CONTEXT_BLOCK}""",
+)
+
 
 def format_target_chunks(chunks: list[Document]) -> str:
     """Format matched target-page chunks for the LLM prompt."""
@@ -517,29 +611,65 @@ def cross_match_chunks(
     return matched_target_chunks, deduplicated_cv_chunks
 
 
+def _route_to_prompt(category: str) -> PromptTemplate:
+    """
+    Return the persona-specific PromptTemplate that matches the classifier
+    output. Defaults to ACADEMIC_PROMPT for any unrecognised category so
+    the pipeline never hard-crashes.
+    """
+    cat = category.strip().upper()
+    if "STARTUP" in cat:
+        return STARTUP_PROMPT
+    if "CORPORATE" in cat:
+        return CORPORATE_PROMPT
+    return ACADEMIC_PROMPT  # default / ACADEMIC
+
+
 def build_generation_chain(role: str, contact_info_text: str):
     """
-    LCEL chain: {target_context, cv_context} -> prompt -> LLM -> str.
+    2-step Agentic Routing chain.
 
-    The retriever has been removed from this chain. Retrieval and cross-matching
-    now happen explicitly in cross_match_chunks() before this chain is invoked,
-    so this function is a pure generation step that receives pre-formatted strings.
+    Step 1 — Classifier (ROUTER_PROMPT → LLM → str):
+        A lightweight LLM call reads the pre-formatted target context and
+        returns one of: ACADEMIC | STARTUP | CORPORATE.
+
+    Step 2 — Persona generation (selected prompt → LLM → str):
+        The matched persona prompt (ACADEMIC / STARTUP / CORPORATE) is
+        invoked with the full inputs dict to draft the email.
+
+    The chain input is a dict::
+        {"target_context": str, "cv_context": str}
     """
     llm = ChatGroq(model=LLM_MODEL, temperature=0.4)
 
-    chain = (
-        {
-            # Both context strings are injected as pre-computed values.
-            "target_context": RunnableLambda(lambda x: x["target_context"]),
-            "cv_context":     RunnableLambda(lambda x: x["cv_context"]),
-            "role":           RunnableLambda(lambda _: role or "Not specified"),
-            "contact_info":   RunnableLambda(lambda _: contact_info_text),
+    # ── Step 1: classifier chain (runs first, cheap, low-temperature call) ──
+    router_chain = ROUTER_PROMPT | llm | StrOutputParser()
+
+    # ── Step 2: persona routing + generation ────────────────────────────────
+    def route_and_generate(inputs: dict) -> str:
+        """Classify the target culture, select the matching prompt, generate."""
+        # Classify
+        category = router_chain.invoke(
+            {"target_context": inputs["target_context"]}
+        ).strip().upper()
+        print(f"\n[AI Agent] Target culture classified as: {category}")
+
+        # Route to the right persona prompt
+        selected_prompt = _route_to_prompt(category)
+
+        # Build full inputs for the persona prompt
+        full_inputs = {
+            "target_context": inputs["target_context"],
+            "cv_context":     inputs["cv_context"],
+            "role":           role or "Not specified",
+            "contact_info":   contact_info_text,
         }
-        | EMAIL_PROMPT
-        | llm
-        | StrOutputParser()
-    )
-    return chain
+
+        # Generate the email with the persona-specific prompt
+        persona_chain = selected_prompt | llm | StrOutputParser()
+        return persona_chain.invoke(full_inputs)
+
+    return RunnableLambda(route_and_generate)
 
 
 def generate_email(url: str, role: str, persist_dir: str = PERSIST_DIR) -> str:
