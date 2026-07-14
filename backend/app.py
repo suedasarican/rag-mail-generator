@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 import sys
+import io
+import pdfplumber
 from pathlib import Path
 from typing import Optional
 
@@ -41,10 +43,9 @@ import main_pipeline as pipeline
 
 app = FastAPI(title="RAG Mail API", version="1.0.0")
 
-# Allow any local Vite dev server (port varies if 5173 is taken)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -119,7 +120,7 @@ class ApplicationOut(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    cv_path: Optional[str] = None
+    cv_text: str
     persist_dir: Optional[str] = None
 
 
@@ -260,28 +261,59 @@ def delete_application(app_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Application not found.")
 
 
+@app.post("/api/upload-cv")
+def upload_cv(file: UploadFile = File(...)):
+    """PDF dosyasını alır, içindeki metni çıkarır ve Frontend'e döndürür."""
+    # 1. İSTEK GELDİĞİ AN TERMİNALE YAZ (Uvicorn'u beklemeden)
+    print(f"\n[DEBUG] --- YENİ DOSYA GELDİ: {file.filename} ---")
+    
+    if not file.filename.lower().endswith(".pdf"):
+        print("[DEBUG] Hata: Dosya PDF formatında değil.")
+        raise HTTPException(status_code=400, detail="Lütfen sadece PDF dosyası yükleyin.")
+    
+    try:
+        print("[DEBUG] Dosya belleğe alınıyor...")
+        content = file.file.read() # async olmadığı için await kullanmıyoruz
+        cv_text = ""
+        
+        print("[DEBUG] pdfplumber ile metin çıkarılıyor (Bu işlem birkaç saniye sürebilir)...")
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            for page in pdf.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    cv_text += extracted + "\n\n"
+        
+        print(f"[DEBUG] Başarılı! {len(cv_text)} karakter çıkarıldı.")
+        if not cv_text.strip():
+            print("[DEBUG] Hata: PDF okundu ama içi boş veya resim tabanlı.")
+            raise HTTPException(status_code=400, detail="PDF'den metin çıkarılamadı veya dosya boş.")
+            
+        return {"cv_text": cv_text.strip()}
+    
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[DEBUG] ÇOK KRİTİK HATA: {exc}")
+        raise HTTPException(status_code=500, detail=f"PDF okunurken hata oluştu: {exc}")
+
+
 @app.post("/api/ingest", status_code=202)
-def ingest(req: IngestRequest = IngestRequest()):
+def ingest(req: IngestRequest):
     """
-    Rebuild (or build for the first time) the CV vector store.
-    Accepts optional cv_path and persist_dir overrides; defaults to the
-    project-level cv_context.md and chroma_db directory.
+    Kullanıcıdan gelen CV metnini alır ve ChromaDB'deki 
+    önceki koleksiyonu temizleyerek vektörleri sıfırdan oluşturur.
     """
-    cv_path = req.cv_path or CV_PATH
     persist_dir = req.persist_dir or PERSIST_DIR
 
-    if not Path(cv_path).exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"CV file not found at: {cv_path}",
-        )
+    if not req.cv_text.strip():
+        raise HTTPException(status_code=400, detail="CV metni boş olamaz.")
 
     try:
-        pipeline.ingest_cv(cv_path, persist_dir)
+        pipeline.ingest_cv(req.cv_text, persist_dir)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"Sistem besleme (Ingestion) başarısız oldu: {exc}")
 
-    return {"message": "CV ingested successfully.", "persist_dir": persist_dir}
+    return {"message": "CV sisteme başarıyla yüklendi ve vektörler oluşturuldu.", "persist_dir": persist_dir}
 
 
 # ---------------------------------------------------------------------------

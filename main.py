@@ -63,7 +63,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import TextLoader, WebBaseLoader
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 # --------------------------------------------------------------------------- #
 # Configuration
@@ -71,8 +71,9 @@ from langchain_groq import ChatGroq
 
 PERSIST_DIR = "./chroma_db"
 COLLECTION_NAME = "cv_context"
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL = "llama-3.3-70b-versatile"
+EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+LLM_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+VLLM_API_BASE = os.getenv("VLLM_API_BASE", "http://localhost:32000/v1")
 TOP_K = 5
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 75
@@ -80,8 +81,10 @@ CHUNK_OVERLAP = 75
 # Dual-retrieval (chunk-to-chunk cross-matching) configuration
 TARGET_CHUNK_SIZE    = 500   # chunk size when splitting the scraped target page
 TARGET_CHUNK_OVERLAP = 50    # overlap between consecutive target page chunks
-MATCH_THRESHOLD      = 0.45  # L2 distance ceiling — a target chunk is relevant
-                              # only if its best CV match score < this value
+MATCH_THRESHOLD      = 0.65  # Cosine distance ceiling — a target chunk is relevant
+                              # only if its best CV match distance < this value
+                              # (cosine distance = 1 - cosine_similarity, so 0.65
+                              #  corresponds to ~0.35 cosine similarity)
 MAX_CV_CHUNKS        = 8     # max deduplicated CV chunks forwarded to the LLM
 MAX_TARGET_CHUNKS    = 6     # max matched target chunks forwarded to the LLM
 
@@ -255,8 +258,9 @@ def ingest_cv(cv_path: str, persist_dir: str = PERSIST_DIR) -> None:
         embedding=embeddings,
         collection_name=COLLECTION_NAME,
         persist_directory=persist_dir,
+        collection_metadata={"hnsw:space": "cosine"},
     )
-    print(f"[Phase 1] Vector store built and persisted at: {persist_dir}")
+    print(f"[Phase 1] Vector store built and persisted at: {persist_dir} (metric: cosine)")
     print(f"[Phase 1] Indexed {vectordb._collection.count()} vectors.")
  
     # Save contact info separately so the signature is always correct,
@@ -349,10 +353,8 @@ _CRITICAL_RULES = """\
 CRITICAL RULES (must never be violated):
 1. You may ONLY use facts, skills, and technologies that appear verbatim in the
    "CANDIDATE FACTS" section below. NEVER invent, assume, or exaggerate.
-2. You MUST prioritize AI-related projects and competitions (e.g., TEKNOFEST).
-   You MAY mention specific project and competition names briefly to provide
-   concrete evidence of your skills. Name the models and the problem solved
-   (e.g., XGBoost for imbalanced classification) if present in CANDIDATE FACTS.
+2. If the CANDIDATE FACTS contain projects, competitions, or specific ML models, 
+   prioritize mentioning them to provide concrete evidence of your skills.
 3. The email MUST start with a professional greeting (e.g., "Dear Hiring Committee,"
    or "Dear [Team/Lab Name],").
 4. You MUST explicitly state that you are applying for a "summer internship".
@@ -423,17 +425,14 @@ email for a university lab or research centre.
 
 CONTENT PRIORITY (ACADEMIC LAB FOCUS — follow strictly):
 - Open with ONE specific reason their published research or lab focus (from
-  TARGET CONTEXT) intersects with your own interests — show you actually read
-  their work, not just their homepage.
-- Emphasise your research-oriented skills: algorithm design, ML model
-  experimentation (e.g., CTGAN for class-imbalance, deep-learning pipelines),
-  data analysis, and methodical problem-solving.
-- If relevant, briefly name a specific competition or project (e.g., TEKNOFEST)
-  to anchor your technical claims to concrete outcomes.
-- Close with ONE genuine sentence about what you want to learn from this lab's
-  specific domain expertise — be precise, not vague.
-- Certificates, GPA, and workshop names are LOW priority unless directly
-  relevant to the lab's research.
+  TARGET CONTEXT) intersects with the candidate's interests.
+- Emphasise research-oriented skills from CANDIDATE FACTS: algorithm design, 
+  ML model experimentation, data analysis, or methodological problem-solving.
+- Briefly name a specific competition or academic project from the facts 
+  to anchor technical claims to concrete outcomes.
+- Close with ONE genuine sentence about what the candidate wants to learn from 
+  this lab's specific domain expertise.
+- Certificates and GPA are LOW priority unless directly relevant.
 
 STYLE:
 - 180-230 words for the body (excluding subject line and signature).
@@ -453,16 +452,14 @@ for a fast-paced tech startup or software house.
 
 CONTENT PRIORITY (STARTUP FOCUS — follow strictly):
 - Lead with ONE specific reason their product, stack, or market focus (from
-  TARGET CONTEXT) excites you — make it concrete, not generic enthusiasm.
-- Highlight your ability to ship: full-stack development (React, ASP.NET Core),
-  database design, end-to-end system integration, and real-world project impact.
-- Frame the 42 Piscine / 42 Istanbul experience (if present in CANDIDATE FACTS)
-  as proof of rapid learning, self-direction, and grit under pressure.
-- Mention any AI/ML work (e.g., TEKNOFEST competitions) to show you bring
-  more than just CRUD skills.
-- Close with ONE sentence about what you want to build or learn alongside
-  their specific team — keep it product-focused.
-- Certificates, GPA, and course names are LOW priority.
+  TARGET CONTEXT) excites the candidate.
+- Highlight the ability to ship software based on CANDIDATE FACTS: full-stack 
+  development, database design, or real-world project impact.
+- Frame any intensive technical training or bootcamps found in the facts as 
+  proof of rapid learning, self-direction, and grit under pressure.
+- Close with ONE sentence about what the candidate wants to build or learn 
+  alongside their specific team.
+- Certificates and course names are LOW priority.
 
 STYLE:
 - 180-230 words for the body (excluding subject line and signature).
@@ -472,6 +469,33 @@ STYLE:
 {_CONTEXT_BLOCK}""",
 )
 
+CORPORATE_PROMPT = PromptTemplate(
+    input_variables=["target_context", "cv_context", "role", "contact_info"],
+    template=f"""You are a senior technical recruiter at a large engineering
+firm helping a Computer Engineering student draft a high-signal summer
+internship application email for a corporate, defense, or aerospace employer.
+
+{_CRITICAL_RULES}
+
+CONTENT PRIORITY (CORPORATE / DEFENSE / AEROSPACE FOCUS — follow strictly):
+- Open with ONE specific reason their engineering domain or ongoing programme
+  (from TARGET CONTEXT) aligns with the candidate's skills.
+- Emphasise scale, reliability, and rigorous engineering: highlight specific
+  technical stacks, programming languages, or ML models used in high-stakes 
+  contexts ONLY IF they exist in the CANDIDATE FACTS.
+- Highlight software-engineering discipline and rigorous team-based project 
+  experience found in the facts.
+- Close with ONE sentence about the specific technical expertise the candidate 
+  wants to develop within their engineering environment.
+- Certificates, GPA, and workshop names are LOW priority.
+
+STYLE:
+- 180-230 words for the body (excluding subject line and signature).
+- Highly formal, structured, and engineering-driven tone — precise language.
+- 3-4 substantive paragraphs; formal greeting; brief closing with insurance note.
+
+{_CONTEXT_BLOCK}""",
+)
 CORPORATE_PROMPT = PromptTemplate(
     input_variables=["target_context", "cv_context", "role", "contact_info"],
     template=f"""You are a senior technical recruiter at a large engineering
@@ -557,7 +581,7 @@ def cross_match_chunks(
         if not results:
             continue
 
-        # Lower L2 distance = better match. Keep the best (minimum) score.
+        # Lower cosine distance = better match. Keep the best (minimum) distance.
         best_score = min(score for _, score in results)
 
         if best_score < MATCH_THRESHOLD:
@@ -640,7 +664,13 @@ def build_generation_chain(role: str, contact_info_text: str):
     The chain input is a dict::
         {"target_context": str, "cv_context": str}
     """
-    llm = ChatGroq(model=LLM_MODEL, temperature=0.4)
+    llm = ChatOpenAI(
+        model=LLM_MODEL,
+        openai_api_key="EMPTY",
+        openai_api_base=VLLM_API_BASE,
+        temperature=0.4,
+        max_tokens=512,
+    )
 
     # ── Step 1: classifier chain (runs first, cheap, low-temperature call) ──
     router_chain = ROUTER_PROMPT | llm | StrOutputParser()
@@ -741,13 +771,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if not os.getenv("GROQ_API_KEY") and args.command == "generate":
+    if not os.getenv("VLLM_API_BASE") and args.command == "generate":
         print(
-            "ERROR: GROQ_API_KEY is not set. Add it to a .env file "
-            "(see .env.example) or export it in your shell.",
+            "WARNING: VLLM_API_BASE is not set. "
+            "Defaulting to http://localhost:32000/v1",
             file=sys.stderr,
         )
-        sys.exit(1)
 
     if args.command == "ingest":
         ingest_cv(args.file, args.persist_dir)

@@ -18,6 +18,7 @@ import {
 import { api } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
 import { ApplicationDetail } from "./ApplicationDetail";
+import CVUploader from "../components/CVUploader";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -66,28 +67,28 @@ export function DashboardView({ onSaved }) {
 
   // Form state
   const [inputMode, setInputMode] = useState("url"); // "url" | "image"
-  const [url,  setUrl]  = useState("");
+  const [url, setUrl] = useState("");
   const [imageFile, setImageFile] = useState(null);
   const [role, setRole] = useState("");
 
   // Generation state
-  const [loading,     setLoading]     = useState(false);
-  const [error,       setError]       = useState(null);
-  const [draft,       setDraft]       = useState(null);
-  const [emailText,   setEmailText]   = useState("");
-  const [orgName,     setOrgName]     = useState("");
-  const [culture,     setCulture]     = useState(null); // ACADEMIC | STARTUP | CORPORATE
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [emailText, setEmailText] = useState("");
+  const [orgName, setOrgName] = useState("");
+  const [culture, setCulture] = useState(null); // ACADEMIC | STARTUP | CORPORATE
 
   // Save state
-  const [saving,       setSaving]       = useState(false);
+  const [saving, setSaving] = useState(false);
   const [savedFeedback, setSavedFeedback] = useState(null);
-  const [copied,       setCopied]       = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // History state
-  const [apps,          setApps]    = useState([]);
-  const [histLoading,   setHistLoading] = useState(true);
-  const [histError,     setHistError]   = useState(null);
-  const [selectedApp,   setSelectedApp] = useState(null); // app opened for editing
+  const [apps, setApps] = useState([]);
+  const [histLoading, setHistLoading] = useState(true);
+  const [histError, setHistError] = useState(null);
+  const [selectedApp, setSelectedApp] = useState(null); // app opened for editing
 
   // ── Load history ──
   const loadHistory = useCallback(async () => {
@@ -118,10 +119,10 @@ export function DashboardView({ onSaved }) {
     setOrgName("");
     setCulture(null);
     try {
-      const result = inputMode === "url" 
+      const result = inputMode === "url"
         ? await api.generate(url.trim(), role.trim() || null)
         : await api.generateFromImage(imageFile, role.trim() || null);
-        
+
       setDraft(result);
       setEmailText(result.generated_email);
       setOrgName(result.organization_name || "");
@@ -184,8 +185,8 @@ export function DashboardView({ onSaved }) {
   }
 
   const cultureColors = {
-    ACADEMIC:  "bg-purple-50 text-purple-700 ring-1 ring-purple-200",
-    STARTUP:   "bg-amber-50  text-amber-700  ring-1 ring-amber-200",
+    ACADEMIC: "bg-purple-50 text-purple-700 ring-1 ring-purple-200",
+    STARTUP: "bg-amber-50  text-amber-700  ring-1 ring-amber-200",
     CORPORATE: "bg-slate-100 text-slate-700  ring-1 ring-slate-300",
   };
 
@@ -204,6 +205,8 @@ export function DashboardView({ onSaved }) {
   return (
     <div className="space-y-6 max-w-6xl">
 
+      <CVUploader />
+
       {/* ── Row 1: Form + CV Status ──────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
@@ -217,22 +220,20 @@ export function DashboardView({ onSaved }) {
           </div>
 
           <div className="space-y-4">
-            
+
             {/* Input Mode Toggle */}
             <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
               <button
                 onClick={() => setInputMode("url")}
-                className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${
-                  inputMode === "url" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                }`}
+                className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${inputMode === "url" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
               >
                 <Globe size={15} /> URL
               </button>
               <button
                 onClick={() => setInputMode("image")}
-                className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${
-                  inputMode === "image" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                }`}
+                className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${inputMode === "image" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
               >
                 <Image size={15} /> Upload Poster
               </button>
@@ -254,19 +255,18 @@ export function DashboardView({ onSaved }) {
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
                   Target Organization Poster
                 </label>
-                <div 
-                  className={`relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl transition-all ${
-                    imageFile ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
-                  }`}
+                <div
+                  className={`relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl transition-all ${imageFile ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                    }`}
                 >
-                  <input 
-                    type="file" 
+                  <input
+                    type="file"
                     accept="image/*"
                     disabled={loading}
                     onChange={(e) => {
                       if (e.target.files && e.target.files[0]) setImageFile(e.target.files[0]);
                     }}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" 
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
                   />
                   {imageFile ? (
                     <div className="flex flex-col items-center gap-2 pointer-events-none">
@@ -296,7 +296,7 @@ export function DashboardView({ onSaved }) {
               label="Your Contact Info Override (optional)"
               placeholder="Leave blank to use ingested CV contact"
               value=""
-              onChange={() => {}}
+              onChange={() => { }}
               icon={User}
               disabled={loading}
             />
@@ -355,10 +355,10 @@ export function DashboardView({ onSaved }) {
           {/* Stats */}
           <div className="space-y-2.5">
             {[
-              { icon: Zap,      label: "Projects",  value: "5 Active",         color: "text-blue-500" },
-              { icon: Database, label: "Skills",    value: "12 Active",        color: "text-purple-500" },
-              { icon: Sparkles, label: "Matching",  value: "Strict",           color: "text-amber-500" },
-              { icon: Zap,      label: "Routing",   value: "Agentic (3-way)",  color: "text-emerald-500" },
+              { icon: Zap, label: "Projects", value: "5 Active", color: "text-blue-500" },
+              { icon: Database, label: "Skills", value: "12 Active", color: "text-purple-500" },
+              { icon: Sparkles, label: "Matching", value: "Strict", color: "text-amber-500" },
+              { icon: Zap, label: "Routing", value: "Agentic (3-way)", color: "text-emerald-500" },
             ].map(({ icon: Icon, label, value, color }) => (
               <div key={label} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2 text-slate-500">
@@ -453,7 +453,7 @@ export function DashboardView({ onSaved }) {
             <button
               id="save-btn"
               onClick={handleSave}
-              disabled={saving || !emailText.trim()}
+              disabled={saving || !emailText?.trim()}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
                          bg-emerald-600 text-white hover:bg-emerald-700
                          disabled:opacity-50 disabled:cursor-not-allowed transition-all"
@@ -482,7 +482,7 @@ export function DashboardView({ onSaved }) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center">
-                <HistoryIcon size={14} className="text-slate-500" />
+              <HistoryIcon size={14} className="text-slate-500" />
             </div>
             <h2 className="text-base font-semibold text-slate-800">Application History</h2>
           </div>

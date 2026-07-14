@@ -9,4 +9,7 @@ chromadb
 sentence-transformers
 beautifulsoup4
 python-dotenv
-langchain-groq
+fastapi
+uvicorn
+sqlalchemy
+pdfplumber

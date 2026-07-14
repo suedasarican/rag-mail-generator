@@ -2,7 +2,7 @@
  * api.js — Thin client wrapper around the FastAPI backend.
  */
 
-const BASE = "http://localhost:8000";
+const BASE = "";
 
 async function request(method, path, body) {
   const opts = {
@@ -30,12 +30,12 @@ export const api = {
     const formData = new FormData();
     formData.append("file", file);
     if (role) formData.append("role", role);
-    
+
     const res = await fetch(`${BASE}/api/generate-from-image`, {
       method: "POST",
       body: formData,
     });
-    
+
     if (res.status === 204) return null;
     const json = await res.json().catch(() => ({ detail: res.statusText }));
     if (!res.ok) {
@@ -60,9 +60,9 @@ export const api = {
   deleteApplication: (id) =>
     request("DELETE", `/api/applications/${id}`),
 
-  ingest: (cvPath, persistDir) =>
+  ingest: (cvText, persistDir) =>
     request("POST", "/api/ingest", {
-      cv_path: cvPath || null,
+      cv_text: cvText,
       persist_dir: persistDir || null,
     }),
 

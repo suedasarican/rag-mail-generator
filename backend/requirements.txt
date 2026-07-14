@@ -6,7 +6,6 @@ langchain-text-splitters
 langchain-huggingface
 langchain-chroma
 langchain-openai
-langchain-groq
 chromadb
 sentence-transformers
 beautifulsoup4
@@ -18,3 +17,4 @@ uvicorn[standard]>=0.29.0
 sqlalchemy>=2.0.0
 pydantic>=2.0.0
 httpx
+pdfplumber
