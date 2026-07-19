@@ -12,6 +12,7 @@ import { EmailEditor } from "../components/EmailEditor";
 export function GenerateView({ onSaved }) {
   const [url, setUrl] = useState("");
   const [role, setRole] = useState("");
+  const [tone, setTone] = useState("Profesyonel/Kurumsal");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -34,7 +35,7 @@ export function GenerateView({ onSaved }) {
     setOrgName("");
 
     try {
-      const result = await api.generate(url.trim(), role.trim() || null);
+      const result = await api.generate(url.trim(), role.trim() || null, tone);
       setDraft(result);
       setEmailText(result.generated_email);
       setOrgName(result.organization_name || "");
@@ -51,7 +52,7 @@ export function GenerateView({ onSaved }) {
     setError(null);
     setSavedFeedback(null);
     try {
-      const result = await api.generate(draft.url, draft.role || null);
+      const result = await api.generate(draft.url, draft.role || null, tone);
       setDraft(result);
       setEmailText(result.generated_email);
       setOrgName(result.organization_name || "");
@@ -130,6 +131,23 @@ export function GenerateView({ onSaved }) {
               placeholder="e.g. Research Intern"
               disabled={loading}
             />
+          </div>
+          <div className="form-group" style={{ minWidth: "180px" }}>
+            <label className="form-label" htmlFor="tone-input">
+              Ses Tonu
+            </label>
+            <select
+              id="tone-input"
+              className="form-input"
+              value={tone}
+              onChange={(e) => setTone(e.target.value)}
+              disabled={loading}
+              style={{ appearance: "auto" }}
+            >
+              <option value="Profesyonel/Kurumsal">Profesyonel/Kurumsal</option>
+              <option value="Akademik (Detaylı)">Akademik (Detaylı)</option>
+              <option value="Samimi/Startup">Samimi/Startup</option>
+            </select>
           </div>
         </div>
 

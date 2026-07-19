@@ -1,11 +1,96 @@
 @import "tailwindcss";
 
-/* Custom scrollbar — subtle, matches the soft palette */
+@theme {
+  --color-primary-400: #818cf8; /* indigo-400 */
+  --color-primary-500: #6366f1; /* indigo-500 */
+  --color-secondary-400: #c084fc; /* purple-400 */
+  --color-secondary-500: #a855f7; /* purple-500 */
+  --color-accent-400: #f472b6; /* pink-400 */
+  --color-bg-base: #f8f9fe;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: #312e81; /* indigo-900 */
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Mailora Cards */
+.card {
+  background: white;
+  border-radius: 1.5rem; /* 2xl */
+  box-shadow: 0 4px 20px -4px rgba(168, 85, 247, 0.08), 0 2px 8px -2px rgba(168, 85, 247, 0.04);
+  padding: 1.5rem;
+  border: 1px solid rgba(192, 132, 252, 0.15); /* purple-400 transparent */
+}
+
+/* Sticker Buttons */
+.btn {
+  border-radius: 9999px;
+  font-weight: 700;
+  padding: 0.75rem 1.5rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  outline: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--color-primary-400), var(--color-secondary-400));
+  color: white;
+  box-shadow: 0 4px 14px -2px rgba(192, 132, 252, 0.4);
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -4px rgba(192, 132, 252, 0.5);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Inputs & Dropdowns */
+.form-input {
+  border-radius: 1rem;
+  border: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+  padding: 0.75rem 1rem;
+  color: #334155;
+  font-weight: 500;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--color-primary-400);
+  background-color: white;
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.2);
+}
+
+.form-label {
+  color: #475569;
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+  display: block;
+}
+
+/* Custom scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-thumb { background: #d8b4fe; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #c084fc; }
 
-/* Smooth transitions everywhere */
+/* Smooth transitions */
 * { transition-property: color, background-color, border-color, box-shadow, opacity, transform;
     transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4,0,0.2,1); }
+

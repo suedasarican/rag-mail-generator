@@ -77,7 +77,7 @@ def get_db():
 # CRUD helpers
 # ---------------------------------------------------------------------------
 
-VALID_STATUSES = {"draft", "sent", "responded", "rejected", "accepted"}
+VALID_STATUSES = ["draft", "sent", "accepted", "rejected"]
 
 
 def _now() -> datetime:

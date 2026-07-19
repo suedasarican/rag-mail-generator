@@ -66,7 +66,11 @@ CV_PATH = str(Path(__file__).parent.parent / "cv_context.md")
 class GenerateRequest(BaseModel):
     url: str
     role: Optional[str] = None
-
+    tone: Optional[str] = "Samimi"
+    purpose: str
+    length: Optional[str] = "Orta"
+    language: Optional[str] = "Türkçe"
+    cvText: Optional[str] = None
 
 class GenerateResponse(BaseModel):
     generated_email: str
@@ -159,7 +163,7 @@ def generate(req: GenerateRequest):
     org_name = pipeline.extract_org_name(url, target_chunks)
 
     try:
-        generated_email = pipeline.generate_email(url, role, PERSIST_DIR)
+        generated_email = pipeline.generate_email(url, role, req.tone, req.purpose, req.length, req.language, req.cvText, PERSIST_DIR)
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -177,7 +181,15 @@ def generate(req: GenerateRequest):
     )
 
 @app.post("/api/generate-from-image", response_model=GenerateResponse)
-async def generate_from_image(file: UploadFile = File(...), role: Optional[str] = Form(None)):
+async def generate_from_image(
+    file: UploadFile = File(...), 
+    role: Optional[str] = Form(None), 
+    tone: Optional[str] = Form("Samimi"),
+    purpose: str = Form(...),
+    length: Optional[str] = Form("Orta"),
+    language: Optional[str] = Form("Türkçe"),
+    cvText: Optional[str] = Form(None)
+):
     """
     Multimodal RAG: extracts text from an uploaded poster image via Vision LLM,
     chunks it, cross-matches against the CV, and generates an email.
@@ -192,7 +204,7 @@ async def generate_from_image(file: UploadFile = File(...), role: Optional[str] 
         )
 
     try:
-        generated_email = pipeline.generate_email_from_image(image_bytes, role, PERSIST_DIR)
+        generated_email = pipeline.generate_email_from_image(image_bytes, role, tone, purpose, length, language, cvText, PERSIST_DIR)
     except Exception as exc:
         raise HTTPException(
             status_code=502,
@@ -323,3 +335,23 @@ def ingest(req: IngestRequest):
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi import HTTPException
+
+# React build klasörünün yolu
+dist_path = Path(__file__).parent.parent / "frontend" / "dist"
+
+# Eğer build klasörü varsa, web sitesini yayınla
+if dist_path.exists():
+    # CSS ve JS dosyalarını (assets) dışa aç
+    app.mount("/assets", StaticFiles(directory=str(dist_path / "assets")), name="assets")
+    
+    # API istekleri dışındaki tüm ziyaretçileri React'in index.html sayfasına yönlendir
+    @app.get("/{catchall:path}")
+    def serve_react(catchall: str):
+        # Eğer yanlış bir /api/ isteği geldiyse HTML döndürmemek için koruma
+        if catchall.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API endpoint bulunamadı")
+        return FileResponse(str(dist_path / "index.html"))

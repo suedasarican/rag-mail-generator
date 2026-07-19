@@ -377,26 +377,22 @@ def extract_org_name(url: str, target_chunks: list[Document]) -> str:
 # --------------------------------------------------------------------------- #
 
 # ── Shared building blocks ───────────────────────────────────────────────────
-# These text blocks are reused verbatim across every persona prompt so that
-# the rules and context-injection logic stay in one place.
-
 _CRITICAL_RULES = """\
 CRITICAL RULES (must never be violated):
 1. You may ONLY use facts, skills, and technologies that appear verbatim in the
    "CANDIDATE FACTS" section below. NEVER invent, assume, or exaggerate.
 2. If the CANDIDATE FACTS contain projects, competitions, or specific ML models, 
    prioritize mentioning them to provide concrete evidence of your skills.
-3. The email MUST start with a professional greeting (e.g., "Dear Hiring Committee,"
-   or "Dear [Team/Lab Name],").
-4. You MUST explicitly state that you are applying for a "summer internship".
-5. You MUST include this exact sentence near the closing of the email:
-   "Please note that my mandatory internship insurance will be fully covered by my university."
-6. Do not invent the name of a hiring manager, a specific team, or any detail
+3. The email MUST start with a professional greeting.
+4. You MUST explicitly align the email with the given MAIL PURPOSE.
+5. You MUST write the email in the REQUESTED LANGUAGE.
+6. You MUST follow the REQUESTED LENGTH.
+7. Do not invent the name of a hiring manager, a specific team, or any detail
    about the target organization that is not present in "TARGET CONTEXT".
-7. The email signature MUST use the exact name, email, phone, LinkedIn, and
+8. The email signature MUST use the exact name, email, phone, LinkedIn, and
    GitHub given in "CONTACT INFO" below, verbatim. NEVER write a placeholder
    like "[Your Name]". Include all of them in the sign-off, each on its own line.
-8. Output ONLY the email (with a subject line), no extra commentary."""
+9. Output ONLY the email (with a subject line), no extra commentary."""
 
 _CONTEXT_BLOCK = """\
 TARGET CONTEXT (only the sections of the target page that matched the
@@ -416,10 +412,13 @@ CONTACT INFO (use verbatim in the signature, every time, no exceptions):
 {contact_info}
 ---
 
-TARGET ROLE (if provided by the user, otherwise infer cautiously from the
-target context without fabricating specifics): {role}
+TARGET ROLE: {role}
+MAIL PURPOSE: {purpose}
+REQUESTED TONE OF VOICE: {tone}
+REQUESTED LENGTH: {length}
+REQUESTED LANGUAGE: {language}
 
-Write the complete application email now, in English, starting with a
+Write the complete email now, matching the requested tone, language and length, starting with a
 subject line formatted as: "Subject: ..."."""
 
 # ── Step 1: Classifier prompt ────────────────────────────────────────────────
@@ -447,36 +446,32 @@ TARGET CONTEXT:
 # ── Step 2: Three persona-specific generation prompts ────────────────────────
 
 ACADEMIC_PROMPT = PromptTemplate(
-    input_variables=["target_context", "cv_context", "role", "contact_info"],
-    template=f"""You are an experienced academic hiring coordinator helping a
-Computer Engineering student draft a high-signal summer internship application
-email for a university lab or research centre.
+    input_variables=["target_context", "cv_context", "role", "contact_info", "tone", "purpose", "length", "language"],
+    template=f"""You are an experienced academic coordinator helping someone draft a high-signal email
+for a university lab or research centre.
 
 {_CRITICAL_RULES}
 
 CONTENT PRIORITY (ACADEMIC LAB FOCUS — follow strictly):
 - Open with ONE specific reason their published research or lab focus (from
   TARGET CONTEXT) intersects with the candidate's interests.
-- Emphasise research-oriented skills from CANDIDATE FACTS: algorithm design, 
-  ML model experimentation, data analysis, or methodological problem-solving.
+- Emphasise research-oriented skills from CANDIDATE FACTS.
 - Briefly name a specific competition or academic project from the facts 
   to anchor technical claims to concrete outcomes.
 - Close with ONE genuine sentence about what the candidate wants to learn from 
   this lab's specific domain expertise.
-- Certificates and GPA are LOW priority unless directly relevant.
 
 STYLE:
-- 180-230 words for the body (excluding subject line and signature).
-- Scholarly, respectful, and deeply curious tone.
-- 3-4 focused paragraphs; formal greeting; brief closing with the insurance note.
+- Deeply curious and respectful tone.
+- Ensure the requested length and language are respected.
+- Structure it professionally.
 
 {_CONTEXT_BLOCK}""",
 )
 
 STARTUP_PROMPT = PromptTemplate(
-    input_variables=["target_context", "cv_context", "role", "contact_info"],
-    template=f"""You are a seasoned startup recruiter helping a Computer
-Engineering student draft a high-signal summer internship application email
+    input_variables=["target_context", "cv_context", "role", "contact_info", "tone", "purpose", "length", "language"],
+    template=f"""You are a seasoned startup professional drafting a high-signal email
 for a fast-paced tech startup or software house.
 
 {_CRITICAL_RULES}
@@ -484,31 +479,28 @@ for a fast-paced tech startup or software house.
 CONTENT PRIORITY (STARTUP FOCUS — follow strictly):
 - Lead with ONE specific reason their product, stack, or market focus (from
   TARGET CONTEXT) excites the candidate.
-- Highlight the ability to ship software based on CANDIDATE FACTS: full-stack 
-  development, database design, or real-world project impact.
+- Highlight the ability to ship software based on CANDIDATE FACTS.
 - Frame any intensive technical training or bootcamps found in the facts as 
   proof of rapid learning, self-direction, and grit under pressure.
 - Close with ONE sentence about what the candidate wants to build or learn 
   alongside their specific team.
-- Certificates and course names are LOW priority.
 
 STYLE:
-- 180-230 words for the body (excluding subject line and signature).
 - Energetic, action-oriented, direct, and concise tone — no fluff.
-- 3-4 tight paragraphs; strong opening; brief closing with the insurance note.
+- Ensure the requested length and language are respected.
+- Structure it professionally.
 
 {_CONTEXT_BLOCK}""",
 )
 
 CORPORATE_PROMPT = PromptTemplate(
-    input_variables=["target_context", "cv_context", "role", "contact_info"],
-    template=f"""You are a senior technical recruiter at a large engineering
-firm helping a Computer Engineering student draft a high-signal summer
-internship application email for a corporate, defense, or aerospace employer.
+    input_variables=["target_context", "cv_context", "role", "contact_info", "tone", "purpose", "length", "language"],
+    template=f"""You are an executive talent strategist drafting a high-signal email
+for a large enterprise or robust engineering firm.
 
 {_CRITICAL_RULES}
 
-CONTENT PRIORITY (CORPORATE / DEFENSE / AEROSPACE FOCUS — follow strictly):
+CONTENT PRIORITY (CORPORATE FOCUS — follow strictly):
 - Open with ONE specific reason their engineering domain or ongoing programme
   (from TARGET CONTEXT) aligns with the candidate's skills.
 - Emphasise scale, reliability, and rigorous engineering: highlight specific
@@ -521,9 +513,9 @@ CONTENT PRIORITY (CORPORATE / DEFENSE / AEROSPACE FOCUS — follow strictly):
 - Certificates, GPA, and workshop names are LOW priority.
 
 STYLE:
-- 180-230 words for the body (excluding subject line and signature).
-- Highly formal, structured, and engineering-driven tone — precise language.
-- 3-4 substantive paragraphs; formal greeting; brief closing with insurance note.
+- Professional, structured, confident, and polite tone.
+- Ensure the requested length and language are respected.
+- Structure it professionally.
 
 {_CONTEXT_BLOCK}""",
 )
@@ -650,7 +642,7 @@ def _route_to_prompt(category: str) -> PromptTemplate:
     return ACADEMIC_PROMPT  # default / ACADEMIC
 
 
-def build_generation_chain(role: str, contact_info_text: str):
+def build_generation_chain(role: str, tone: str, purpose: str, length: str, language: str, contact_info_text: str):
     """
     2-step Agentic Routing chain.
 
@@ -694,6 +686,10 @@ def build_generation_chain(role: str, contact_info_text: str):
             "cv_context":     inputs["cv_context"],
             "role":           role or "Not specified",
             "contact_info":   contact_info_text,
+            "tone":           tone or "Samimi",
+            "purpose":        purpose or "Genel İletişim",
+            "length":         length or "Orta",
+            "language":       language or "Türkçe",
         }
 
         # Generate the email with the persona-specific prompt
@@ -703,7 +699,7 @@ def build_generation_chain(role: str, contact_info_text: str):
     return RunnableLambda(route_and_generate)
 
 
-def generate_email(url: str, role: str, persist_dir: str = PERSIST_DIR) -> str:
+def generate_email(url: str, role: str, tone: str, purpose: str, length: str, language: str, cvText: str, persist_dir: str = PERSIST_DIR) -> str:
     """
     Full pipeline orchestrator:
       Phase 2 → scrape & chunk the target page
@@ -740,10 +736,14 @@ def generate_email(url: str, role: str, persist_dir: str = PERSIST_DIR) -> str:
         f"[Phase 3] Generating email with "
         f"{len(matched_targets)} target chunk(s) + {len(matched_cv)} CV chunk(s)..."
     )
-    chain = build_generation_chain(role, contact_info_text)
+    chain = build_generation_chain(role, tone, purpose, length, language, contact_info_text)
+    cv_context_str = format_cv_chunks(matched_cv)
+    if cvText:
+        cv_context_str = f"USER PROVIDED CV/CONTEXT:\\n{cvText}\\n\\n" + cv_context_str
+
     email = chain.invoke({
         "target_context": format_target_chunks(matched_targets),
-        "cv_context":     format_cv_chunks(matched_cv),
+        "cv_context":     cv_context_str,
     })
     return email
 
@@ -778,7 +778,7 @@ def extract_text_from_image(image_bytes: bytes) -> str:
         return "\n".join(text_parts)
     return str(content)
 
-def generate_email_from_image(image_bytes: bytes, role: str, persist_dir: str = PERSIST_DIR) -> str:
+def generate_email_from_image(image_bytes: bytes, role: str, tone: str, purpose: str, length: str, language: str, cvText: str, persist_dir: str = PERSIST_DIR) -> str:
     """
     Full pipeline orchestrator using an image poster instead of a URL.
     """
@@ -807,10 +807,14 @@ def generate_email_from_image(image_bytes: bytes, role: str, persist_dir: str = 
         f"[Phase 3] Generating email with "
         f"{len(matched_targets)} target chunk(s) + {len(matched_cv)} CV chunk(s)..."
     )
-    chain = build_generation_chain(role, contact_info_text)
+    chain = build_generation_chain(role, tone, purpose, length, language, contact_info_text)
+    cv_context_str = format_cv_chunks(matched_cv)
+    if cvText:
+        cv_context_str = f"USER PROVIDED CV/CONTEXT:\\n{cvText}\\n\\n" + cv_context_str
+
     email = chain.invoke({
         "target_context": format_target_chunks(matched_targets),
-        "cv_context":     format_cv_chunks(matched_cv),
+        "cv_context":     cv_context_str,
     })
     return email
 

@@ -23,13 +23,26 @@ async function request(method, path, body) {
 }
 
 export const api = {
-  generate: (url, role) =>
-    request("POST", "/api/generate", { url, role: role || null }),
+  generate: (url, role, tone, purpose, length, language, cvText) =>
+    request("POST", "/api/generate", { 
+      url, 
+      role: role || null, 
+      tone: tone || "Samimi",
+      purpose: purpose,
+      length: length || "Orta",
+      language: language || "Türkçe",
+      cvText: cvText || null
+    }),
 
-  generateFromImage: async (file, role) => {
+  generateFromImage: async (file, role, tone, purpose, length, language, cvText) => {
     const formData = new FormData();
     formData.append("file", file);
     if (role) formData.append("role", role);
+    if (tone) formData.append("tone", tone);
+    if (purpose) formData.append("purpose", purpose);
+    if (length) formData.append("length", length);
+    if (language) formData.append("language", language);
+    if (cvText) formData.append("cvText", cvText);
 
     const res = await fetch(`${BASE}/api/generate-from-image`, {
       method: "POST",

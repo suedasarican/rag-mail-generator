@@ -1,25 +1,26 @@
 /**
- * App.jsx — Dashboard shell with fixed sidebar + scrollable main content.
+ * App.jsx — Mailora Layout
  */
 import { useState } from "react";
 import "./index.css";
 import {
-  LayoutDashboard, FileText, History as HistoryIcon, Settings, HelpCircle,
-  Mail, Bell, MessageSquare, ChevronRight,
+  Home, PlusCircle, History as HistoryIcon, FileText, LayoutTemplate, Settings,
+  Sparkles, ChevronDown
 } from "lucide-react";
 import { DashboardView } from "./views/DashboardView";
 import { HistoryView }   from "./views/HistoryView";
 
 const NAV_ITEMS = [
-  { id: "dashboard", label: "Dashboard",           icon: LayoutDashboard },
-  { id: "cv",        label: "My CV Context",       icon: FileText },
-  { id: "history",   label: "Application History", icon: HistoryIcon },
-  { id: "settings",  label: "Settings",            icon: Settings },
-  { id: "help",      label: "Help",                icon: HelpCircle },
+  { id: "dashboard", label: "Anasayfa",      icon: Home },
+  { id: "new",       label: "Yeni Mail",     icon: PlusCircle },
+  { id: "history",   label: "Geçmiş Mailler",icon: HistoryIcon },
+  { id: "drafts",    label: "Taslaklar",     icon: FileText },
+  { id: "templates", label: "Şablonlar",     icon: LayoutTemplate },
+  { id: "settings",  label: "Ayarlar",       icon: Settings },
 ];
 
 export default function App() {
-  const [tab, setTab]                   = useState("dashboard");
+  const [tab, setTab] = useState("dashboard");
   const [historyRefresh, setHistoryRefresh] = useState(0);
 
   function handleSaved() {
@@ -27,24 +28,22 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
+    <div className="flex h-screen w-full bg-[#f8f9fe] font-sans overflow-hidden">
 
-      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
-      <aside className="w-64 shrink-0 flex flex-col bg-white border-r border-slate-200 shadow-sm">
+      {/* ── Left Sidebar ─────────────────────────────────────────────────── */}
+      <aside className="w-64 shrink-0 flex flex-col bg-[#fcfdff] border-r border-indigo-50/50 shadow-[4px_0_24px_rgba(168,85,247,0.03)] z-10">
 
         {/* Brand */}
-        <div className="flex items-center gap-3 px-5 py-5 border-b border-slate-100">
-          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-600 text-white shadow-sm">
-            <Mail size={18} />
+        <div className="flex items-center gap-2 px-6 py-8">
+          <Sparkles className="text-purple-500 fill-purple-500/20" size={24} />
+          <div>
+            <h1 className="font-bold text-slate-800 text-xl leading-none tracking-tight">Mailora</h1>
+            <p className="text-[10px] text-slate-400 font-medium tracking-wide mt-1">AI Mail Generator</p>
           </div>
-          <span className="font-semibold text-slate-800 text-sm leading-tight">
-            Intern Mail<br />
-            <span className="text-blue-500 font-medium">Automator</span>
-          </span>
         </div>
 
         {/* Nav links */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5" aria-label="Main navigation">
+        <nav className="flex-1 px-4 space-y-1.5" aria-label="Main navigation">
           {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
             const active = tab === id;
             return (
@@ -54,59 +53,60 @@ export default function App() {
                   setTab(id);
                   if (id === "history") setHistoryRefresh((n) => n + 1);
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all
                   ${active
-                    ? "bg-blue-50 text-blue-700 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.18)]"
+                    ? "bg-purple-50/80 text-purple-700 shadow-sm shadow-purple-100/50"
                     : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
                   }`}
               >
-                <Icon size={17} className={active ? "text-blue-600" : "text-slate-400"} />
-                <span className="flex-1 text-left">{label}</span>
-                {active && <ChevronRight size={14} className="text-blue-400" />}
+                <Icon size={18} className={active ? "text-purple-600" : "text-slate-400"} />
+                <span>{label}</span>
               </button>
             );
           })}
         </nav>
 
-        {/* Footer hint */}
-        <div className="px-5 py-4 border-t border-slate-100">
-          <p className="text-xs text-slate-400">RAG Pipeline v2.0</p>
-          <p className="text-xs text-slate-400">Agentic Routing Active</p>
+        {/* Mailora Pro Card */}
+        <div className="px-4 py-4">
+          <div className="bg-gradient-to-br from-indigo-50/80 to-purple-50/80 rounded-2xl p-4 text-center border border-white shadow-sm shadow-purple-100/30">
+            <h4 className="text-sm font-bold text-indigo-900 flex items-center justify-center gap-1">
+              Mailora Pro <Sparkles size={14} className="text-purple-400" />
+            </h4>
+            <p className="text-xs text-indigo-900/60 mt-1 mb-3 leading-relaxed">
+              Daha fazla özellik, sınırsız mail üretimi ve öncelikli destek.
+            </p>
+            <button className="w-full bg-white text-green-600 border border-green-100 text-xs font-bold py-2 rounded-xl shadow-sm hover:shadow hover:-translate-y-0.5 transition-all">
+              Pro'ya Geç
+            </button>
+          </div>
+        </div>
+
+        {/* Profile */}
+        <div className="p-4 mt-auto border-t border-slate-100/60">
+          <button className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-slate-50 transition-colors">
+            <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-bold">
+              SN
+            </div>
+            <span className="text-sm font-semibold text-slate-700 flex-1 text-left">Süeda Nur</span>
+            <ChevronDown size={16} className="text-slate-400" />
+          </button>
         </div>
       </aside>
 
       {/* ── Main area ────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-
-        {/* Top header */}
-        <header className="shrink-0 flex items-center justify-between px-6 py-3.5 bg-white border-b border-slate-200 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <div>
-            <h2 className="text-base font-semibold text-slate-800 leading-none">
-              {NAV_ITEMS.find((n) => n.id === tab)?.label ?? "Dashboard"}
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">AI-powered internship email generation</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="relative p-2 rounded-xl text-slate-400 hover:bg-slate-50 hover:text-slate-600">
-              <Bell size={18} />
-              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
-            </button>
-            <button className="p-2 rounded-xl text-slate-400 hover:bg-slate-50 hover:text-slate-600">
-              <MessageSquare size={18} />
-            </button>
-            <div className="ml-2 w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-              S
-            </div>
-          </div>
-        </header>
-
-        {/* Scrollable content */}
-        <main className="flex-1 overflow-y-auto p-6">
-          {tab === "dashboard" && <DashboardView onSaved={handleSaved} />}
-          {tab === "history"   && <HistoryView refreshKey={historyRefresh} />}
-          {(tab === "cv" || tab === "settings" || tab === "help") && (
-            <div className="flex items-center justify-center h-64 text-slate-400 text-sm">
-              This section is coming soon.
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        <main className="flex-1 overflow-y-auto p-8">
+          {(tab === "dashboard" || tab === "new") && (
+            <DashboardView 
+              onSaved={handleSaved} 
+              onViewHistory={() => setTab("history")} 
+            />
+          )}
+          {tab === "history" && <HistoryView refreshKey={historyRefresh} />}
+          {(tab === "drafts" || tab === "templates" || tab === "settings") && (
+            <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+              <Sparkles size={32} className="text-purple-200 mb-3" />
+              <p className="text-sm font-medium">Bu özellik çok yakında eklenecek.</p>
             </div>
           )}
         </main>

@@ -1,3 +1,5 @@
+
+# Existing RAG pipeline dependencies
 langchain
 langchain-core
 langchain-community
@@ -9,7 +11,12 @@ chromadb
 sentence-transformers
 beautifulsoup4
 python-dotenv
-fastapi
-uvicorn
-sqlalchemy
+
+# FastAPI backend
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+sqlalchemy>=2.0.0
+pydantic>=2.0.0
+httpx
 pdfplumber
+python-multipart

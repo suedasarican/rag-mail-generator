@@ -1,75 +1,36 @@
 /**
  * DashboardView.jsx
- *
- * Main dashboard page containing all 4 widgets:
- *   A: Create New Application form
- *   B: CV Context Status card
- *   C: Generated Email Draft output
- *   D: Application History table
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Globe, Briefcase, User, Sparkles, Loader2,
-  CheckCircle2, Copy, Eye, Trash2, Pencil,
-  RefreshCw, BookOpen, Zap, Database,
-  AlertTriangle, Check, History as HistoryIcon, Mail, Image, UploadCloud,
+  Sparkles, Loader2, Copy, AlertTriangle, Link as LinkIcon, 
+  UploadCloud, FileText, ChevronRight, CheckCircle2, FileUp, Info, ChevronDown, Mail, History as HistoryIcon, Image,
 } from "lucide-react";
 import { api } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
-import { ApplicationDetail } from "./ApplicationDetail";
-import CVUploader from "../components/CVUploader";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
+// Format date helper
 function fmt(iso) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short", day: "numeric", year: "numeric",
+  return new Date(iso).toLocaleDateString("tr-TR", {
+    month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit"
   });
 }
 
-function truncate(str, n = 48) {
-  if (!str) return "—";
-  return str.length > n ? str.slice(0, n) + "…" : str;
-}
-
-// ── Widget A input field ──────────────────────────────────────────────────────
-function InputField({ id, label, placeholder, value, onChange, icon: Icon, type = "text", disabled }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-        {label}
-      </label>
-      <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-          <Icon size={15} />
-        </span>
-        <input
-          id={id}
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          disabled={disabled}
-          className="w-full pl-9 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl
-                     text-slate-800 placeholder-slate-400 outline-none
-                     focus:ring-2 focus:ring-blue-200 focus:border-blue-400
-                     disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-        />
-      </div>
-    </div>
-  );
-}
-
-// ── Main component ────────────────────────────────────────────────────────────
-export function DashboardView({ onSaved }) {
+export function DashboardView({ onSaved, onViewHistory }) {
 
   // Form state
-  const [inputMode, setInputMode] = useState("url"); // "url" | "image"
   const [url, setUrl] = useState("");
   const [imageFile, setImageFile] = useState(null);
-  const [role, setRole] = useState("");
+  const [cvFile, setCvFile] = useState(null);
+  const [cvText, setCvText] = useState("");
+  const [purpose, setPurpose] = useState("");
+  
+  // Settings state
+  const [tone, setTone] = useState("Samimi");
+  const [length, setLength] = useState("Orta");
+  const [language, setLanguage] = useState("Türkçe");
 
   // Generation state
   const [loading, setLoading] = useState(false);
@@ -77,28 +38,28 @@ export function DashboardView({ onSaved }) {
   const [draft, setDraft] = useState(null);
   const [emailText, setEmailText] = useState("");
   const [orgName, setOrgName] = useState("");
-  const [culture, setCulture] = useState(null); // ACADEMIC | STARTUP | CORPORATE
 
   // Save state
   const [saving, setSaving] = useState(false);
   const [savedFeedback, setSavedFeedback] = useState(null);
   const [copied, setCopied] = useState(false);
 
-  // History state
-  const [apps, setApps] = useState([]);
+  // History state (Right Sidebar)
+  const [recentApps, setRecentApps] = useState([]);
   const [histLoading, setHistLoading] = useState(true);
-  const [histError, setHistError] = useState(null);
-  const [selectedApp, setSelectedApp] = useState(null); // app opened for editing
+
+  // File drag & drop ref
+  const fileInputRef = useRef(null);
+  const imageInputRef = useRef(null);
 
   // ── Load history ──
   const loadHistory = useCallback(async () => {
     setHistLoading(true);
-    setHistError(null);
     try {
       const data = await api.listApplications();
-      setApps(data);
+      setRecentApps(data.slice(0, 3)); // Only take top 3 for dashboard
     } catch (err) {
-      setHistError(err.message);
+      console.error(err);
     } finally {
       setHistLoading(false);
     }
@@ -106,10 +67,36 @@ export function DashboardView({ onSaved }) {
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
+  // ── Handle CV Drag & Drop ──
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCvFile(file);
+    
+    // Auto-extract text
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch("/api/upload-cv", { method: "POST", body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        setCvText(data.cv_text);
+      }
+    } catch (err) {
+      console.error("CV extraction failed", err);
+    }
+  };
+
   // ── Generate ──
   async function handleGenerate() {
-    if (inputMode === "url" && !url.trim()) return;
-    if (inputMode === "image" && !imageFile) return;
+    if (!purpose.trim()) {
+      setError("Lütfen mailin konusunu veya amacını belirtin.");
+      return;
+    }
+    if (!url.trim() && !imageFile) {
+      setError("Lütfen bir hedef URL girin veya ilan görseli yükleyin.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -117,16 +104,17 @@ export function DashboardView({ onSaved }) {
     setDraft(null);
     setEmailText("");
     setOrgName("");
-    setCulture(null);
     try {
-      const result = inputMode === "url"
-        ? await api.generate(url.trim(), role.trim() || null)
-        : await api.generateFromImage(imageFile, role.trim() || null);
+      let result;
+      if (imageFile) {
+        result = await api.generateFromImage(imageFile, "", tone, purpose, length, language, cvText);
+      } else {
+        result = await api.generate(url.trim(), "", tone, purpose, length, language, cvText);
+      }
 
       setDraft(result);
       setEmailText(result.generated_email);
       setOrgName(result.organization_name || "");
-      if (result.culture) setCulture(result.culture);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -138,436 +126,355 @@ export function DashboardView({ onSaved }) {
   async function handleSave() {
     if (!draft || !emailText.trim()) return;
     setSaving(true);
-    setError(null);
+    setSavedFeedback(null);
     try {
       await api.saveApplication({
         url: draft.url,
-        role: draft.role || null,
+        role: purpose || null,
         organization_name: orgName || null,
         generated_email: draft.generated_email,
         final_email: emailText,
         status: "draft",
       });
-      setSavedFeedback("Saved to history!");
+      setSavedFeedback("success");
       onSaved?.();
       loadHistory();
     } catch (err) {
-      setError(err.message);
+      setSavedFeedback(err.message);
     } finally {
       setSaving(false);
     }
   }
 
-  // ── Copy ──
-  async function handleCopy() {
-    await navigator.clipboard.writeText(emailText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  // ── Discard ──
-  function handleDiscard() {
-    setDraft(null);
-    setEmailText("");
-    setOrgName("");
-    setError(null);
-    setSavedFeedback(null);
-    setCulture(null);
-  }
-
-  // ── Delete history row ──
-  async function handleDelete(id, e) {
-    e.stopPropagation();
-    try {
-      await api.deleteApplication(id);
-      setApps((prev) => prev.filter((a) => a.id !== id));
-    } catch { /* silent */ }
-  }
-
-  const cultureColors = {
-    ACADEMIC: "bg-purple-50 text-purple-700 ring-1 ring-purple-200",
-    STARTUP: "bg-amber-50  text-amber-700  ring-1 ring-amber-200",
-    CORPORATE: "bg-slate-100 text-slate-700  ring-1 ring-slate-300",
-  };
-
-  // ── Edit view early-return ──
-  if (selectedApp) {
-    return (
-      <ApplicationDetail
-        app={selectedApp}
-        onBack={() => { setSelectedApp(null); loadHistory(); }}
-        onDeleted={() => { setSelectedApp(null); loadHistory(); }}
-      />
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className="flex flex-col lg:flex-row gap-8 items-start">
+      
+      {/* ── CENTER AREA (Form) ───────────────────────────────────────────── */}
+      <div className="flex-1 w-full flex flex-col gap-6">
+        
+        {/* Header Banner */}
+        <div className="card border-0 bg-white shadow-sm flex items-center justify-between overflow-hidden relative">
+          <div className="z-10 relative">
+            <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+              Merhaba, Süeda! <span className="animate-wave inline-block origin-bottom-right">👋</span>
+            </h2>
+            <p className="text-slate-500 font-medium mt-2">Yapay zeka ile etkileyici mailler oluşturun.</p>
+          </div>
+          {/* Decorative element */}
+          <div className="absolute right-0 top-0 bottom-0 w-64 bg-gradient-to-l from-purple-50 to-transparent pointer-events-none" />
+          <Sparkles className="absolute right-12 top-8 text-purple-200" size={64} strokeWidth={1} />
+          <Mail className="absolute right-24 bottom-2 text-indigo-100" size={48} strokeWidth={1.5} />
+        </div>
 
-      <CVUploader />
-
-      {/* ── Row 1: Form + CV Status ──────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
-        {/* Widget A — Create New Application */}
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-6 border border-slate-100">
-          <div className="flex items-center gap-2 mb-5">
-            <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center">
-              <Sparkles size={14} className="text-blue-600" />
-            </div>
-            <h2 className="text-base font-semibold text-slate-800">Create New Application</h2>
+        {/* Form Card */}
+        <div className="card space-y-6 relative overflow-hidden">
+          <div className="flex items-center gap-2 text-indigo-600 mb-2">
+            <Sparkles size={20} />
+            <h3 className="font-bold text-lg">Yeni Mail Oluştur</h3>
           </div>
 
-          <div className="space-y-4">
-
-            {/* Input Mode Toggle */}
-            <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
-              <button
-                onClick={() => setInputMode("url")}
-                className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${inputMode === "url" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                  }`}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* CV Upload */}
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                CV Yükle <span className="text-slate-400 font-normal text-xs">(Opsiyonel)</span>
+                <Info size={14} className="text-slate-400 ml-auto" />
+              </label>
+              <div 
+                className="border-2 border-dashed border-indigo-100 bg-indigo-50/30 hover:bg-indigo-50/80 transition-colors rounded-2xl p-4 flex flex-col items-center justify-center gap-2 cursor-pointer relative"
+                onClick={() => fileInputRef.current?.click()}
               >
-                <Globe size={15} /> URL
-              </button>
-              <button
-                onClick={() => setInputMode("image")}
-                className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg transition-all ${inputMode === "image" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                  }`}
-              >
-                <Image size={15} /> Upload Poster
-              </button>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileChange} 
+                  accept="application/pdf,.docx" 
+                  className="hidden" 
+                />
+                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-500 flex items-center justify-center mb-1">
+                  {cvFile ? <FileText size={20} /> : <FileUp size={20} />}
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-slate-700">
+                    {cvFile ? cvFile.name : "CV'nizi buraya sürükleyin"}
+                  </p>
+                  <p className="text-xs text-indigo-400 mt-0.5">veya <span className="underline">dosya seçin</span></p>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">PDF, DOCX formatında (Max. 5MB)</p>
+              </div>
             </div>
 
-            {inputMode === "url" ? (
-              <InputField
-                id="target-url"
-                label="Target Organization URL"
-                placeholder="https://example-lab.edu/careers"
-                value={url}
-                onChange={setUrl}
-                icon={Globe}
-                type="url"
-                disabled={loading}
+            {/* Link Input or Image Upload */}
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                Hedef İlan <span className="text-slate-400 font-normal text-xs">(Link veya Görsel)</span>
+                <Info size={14} className="text-slate-400 ml-auto" />
+              </label>
+              <div className="border border-slate-200 bg-slate-50 rounded-2xl p-4 flex flex-col h-full">
+                
+                {imageFile ? (
+                  <div className="relative flex-1 flex flex-col items-center justify-center border-2 border-dashed border-indigo-200 bg-indigo-50/50 rounded-xl p-3">
+                    <div className="flex items-center gap-2">
+                      <Image size={18} className="text-indigo-500" />
+                      <span className="text-sm font-semibold text-slate-700 truncate max-w-[150px]">{imageFile.name}</span>
+                    </div>
+                    <button 
+                      onClick={() => setImageFile(null)} 
+                      className="mt-2 text-xs font-bold text-red-500 hover:text-red-700"
+                    >
+                      Görseli Kaldır
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative flex-1 flex flex-col justify-center gap-2">
+                    <div className="relative">
+                      <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                      <input
+                        type="url"
+                        value={url}
+                        onChange={(e) => setUrl(e.target.value)}
+                        placeholder="LinkedIn profili veya ilan linki"
+                        className="w-full bg-white border border-slate-200 rounded-xl py-3 pl-9 pr-3 text-sm font-medium text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
+                      />
+                    </div>
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Veya</span>
+                    </div>
+                    <button 
+                      onClick={() => imageInputRef.current?.click()}
+                      className="flex items-center justify-center gap-1.5 w-full bg-white border border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/30 rounded-xl py-2 text-sm font-medium text-slate-600 transition-all"
+                    >
+                      <UploadCloud size={16} className="text-indigo-400" /> İlan Görseli Yükle
+                    </button>
+                    <input 
+                      type="file" 
+                      ref={imageInputRef} 
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) setImageFile(e.target.files[0]);
+                      }} 
+                      accept="image/*" 
+                      className="hidden" 
+                    />
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-500 mt-auto pt-3 text-center">İlandan bilgiler otomatik çekilir.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Purpose */}
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+              Mail Konusu / Amacı <span className="text-red-400">*</span>
+              <Info size={14} className="text-slate-400 ml-auto" />
+            </label>
+            <div className="relative">
+              <textarea
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+                placeholder="Örn: Yazılım mühendisi pozisyonu için başvuru maili, veya bir projede iş birliği talebi."
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-medium text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 min-h-[100px] resize-y transition-all"
               />
-            ) : (
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                  Target Organization Poster
-                </label>
-                <div
-                  className={`relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl transition-all ${imageFile ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
-                    }`}
+              <span className="absolute bottom-3 right-4 text-[10px] font-semibold text-slate-400">
+                {purpose.length}/300
+              </span>
+            </div>
+          </div>
+
+          {/* Configuration Dropdowns */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-5">
+            
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-bold text-slate-700">Ton Seçimi</label>
+              <div className="relative">
+                <select 
+                  value={tone} 
+                  onChange={(e) => setTone(e.target.value)}
+                  className="w-full appearance-none bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-sm font-medium text-slate-700 outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 cursor-pointer"
                 >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    disabled={loading}
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) setImageFile(e.target.files[0]);
-                    }}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                  />
-                  {imageFile ? (
-                    <div className="flex flex-col items-center gap-2 pointer-events-none">
-                      <CheckCircle2 className="text-blue-500" size={24} />
-                      <span className="text-sm font-medium text-slate-700">{imageFile.name}</span>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 pointer-events-none text-slate-400">
-                      <UploadCloud size={28} />
-                      <span className="text-sm">Click or drag image to upload</span>
-                    </div>
-                  )}
-                </div>
+                  <option value="Samimi">😊 Samimi / Startup</option>
+                  <option value="Resmi">👔 Resmi / Kurumsal</option>
+                  <option value="Akademik">🎓 Akademik (Detaylı)</option>
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-bold text-slate-700">Uzunluk</label>
+              <div className="relative">
+                <select 
+                  value={length} 
+                  onChange={(e) => setLength(e.target.value)}
+                  className="w-full appearance-none bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-sm font-medium text-slate-700 outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 cursor-pointer"
+                >
+                  <option value="Kısa">Kısa ve Öz</option>
+                  <option value="Orta">Orta Uzunlukta</option>
+                  <option value="Uzun">Detaylı ve Uzun</option>
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-bold text-slate-700">Dil</label>
+              <div className="relative">
+                <select 
+                  value={language} 
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="w-full appearance-none bg-white border border-slate-200 rounded-xl py-2.5 px-3 text-sm font-medium text-slate-700 outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 cursor-pointer"
+                >
+                  <option value="Türkçe">🇹🇷 Türkçe</option>
+                  <option value="İngilizce">🇬🇧 İngilizce</option>
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+          </div>
+
+          {/* Action Area */}
+          <div className="pt-2">
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm font-medium rounded-xl border border-red-100 flex items-center gap-2">
+                <AlertTriangle size={16} /> {error}
               </div>
             )}
-            <InputField
-              id="role-input"
-              label="Target Internship Role"
-              placeholder="e.g. AI Research Intern"
-              value={role}
-              onChange={setRole}
-              icon={Briefcase}
-              disabled={loading}
-            />
-            <InputField
-              id="contact-info"
-              label="Your Contact Info Override (optional)"
-              placeholder="Leave blank to use ingested CV contact"
-              value=""
-              onChange={() => { }}
-              icon={User}
-              disabled={loading}
-            />
-          </div>
-
-          <div className="mt-5 flex items-center gap-3">
             <button
-              id="generate-btn"
               onClick={handleGenerate}
-              disabled={loading || (inputMode === "url" ? !url.trim() : !imageFile)}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold
-                         bg-blue-600 text-white shadow-sm hover:bg-blue-700
-                         disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              disabled={loading || !purpose.trim()}
+              className="w-full py-3.5 bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 text-white rounded-2xl font-bold text-base shadow-[0_4px_14px_-2px_rgba(192,132,252,0.4)] hover:shadow-[0_8px_20px_-4px_rgba(192,132,252,0.6)] hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading
-                ? <><Loader2 size={15} className="animate-spin" /> Generating…</>
-                : <><Sparkles size={15} /> Generate Email</>
-              }
+              {loading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+              {loading ? "Oluşturuluyor..." : "Mail Oluştur"}
             </button>
-            {loading && (
-              <p className="text-xs text-slate-400 animate-pulse">
-                Scraping page & classifying culture…
+            <p className="text-center text-xs font-medium text-purple-400 mt-3 rotate-[-2deg]">
+              ✨ AI sihri burada!
+            </p>
+          </div>
+        </div>
+
+        {/* Draft Result Area */}
+        {draft && (
+          <div className="card flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-800">Üretilen Mail</h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(emailText);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="btn bg-slate-100 text-slate-600 hover:bg-slate-200 px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                >
+                  {copied ? <CheckCircle2 size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                  {copied ? "Kopyalandı" : "Kopyala"}
+                </button>
+              </div>
+            </div>
+
+            <textarea
+              className="w-full h-64 p-4 text-sm font-medium bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-200 resize-y"
+              value={emailText}
+              onChange={(e) => setEmailText(e.target.value)}
+            />
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <input
+                type="text"
+                placeholder="Şirket / Organizasyon Adı (Opsiyonel)"
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                className="flex-1 form-input rounded-xl"
+              />
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="btn btn-primary rounded-xl px-6"
+              >
+                {saving ? "Kaydediliyor..." : "Geçmişe Kaydet"}
+              </button>
+            </div>
+
+            {savedFeedback === "success" && (
+              <p className="text-emerald-600 text-sm font-semibold flex items-center gap-1.5 justify-end">
+                <CheckCircle2 size={16} /> Taslak başarıyla kaydedildi!
+              </p>
+            )}
+            {savedFeedback && savedFeedback !== "success" && (
+              <p className="text-red-500 text-sm font-semibold flex items-center gap-1.5 justify-end">
+                <AlertTriangle size={16} /> {savedFeedback}
               </p>
             )}
           </div>
+        )}
 
-          {/* Error banner */}
-          {error && !draft && (
-            <div className="mt-4 flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
-              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-              {error}
-            </div>
-          )}
-        </div>
-
-        {/* Widget B — CV Context Status */}
-        <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-6 border border-slate-100 flex flex-col gap-5">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
-              <BookOpen size={14} className="text-emerald-600" />
-            </div>
-            <h2 className="text-base font-semibold text-slate-800">CV Context</h2>
-          </div>
-
-          {/* Progress */}
-          <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3">
-            <div className="flex items-center gap-2 mb-1.5">
-              <CheckCircle2 size={15} className="text-emerald-600" />
-              <span className="text-sm font-semibold text-emerald-700">CV Completed: 100%</span>
-            </div>
-            <div className="w-full bg-emerald-200 rounded-full h-1.5 overflow-hidden">
-              <div className="bg-emerald-500 h-1.5 rounded-full w-full" />
-            </div>
-          </div>
-
-          {/* Stats */}
-          <div className="space-y-2.5">
-            {[
-              { icon: Zap, label: "Projects", value: "5 Active", color: "text-blue-500" },
-              { icon: Database, label: "Skills", value: "12 Active", color: "text-purple-500" },
-              { icon: Sparkles, label: "Matching", value: "Strict", color: "text-amber-500" },
-              { icon: Zap, label: "Routing", value: "Agentic (3-way)", color: "text-emerald-500" },
-            ].map(({ icon: Icon, label, value, color }) => (
-              <div key={label} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2 text-slate-500">
-                  <Icon size={13} className={color} />
-                  {label}
-                </div>
-                <span className="text-slate-700 font-medium text-xs">{value}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Culture badge — shown after generation */}
-          {culture && (
-            <div className={`px-3 py-2 rounded-xl text-xs font-semibold text-center ${cultureColors[culture] ?? "bg-slate-100 text-slate-600"}`}>
-              🤖 Routed to: {culture} prompt
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* ── Widget C — Generated Email Draft ─────────────────────────────── */}
-      {draft && !loading && (
-        <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-6 border border-slate-100">
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center">
-                <Mail size={14} className="text-blue-600" />
+      {/* ── RIGHT SIDEBAR ──────────────────────────────────────────────────── */}
+      <div className="w-full lg:w-[320px] shrink-0 flex flex-col gap-6">
+        
+        {/* Recent History Card */}
+        <div className="card p-5">
+          <div className="flex items-center gap-2 text-indigo-700 mb-4 font-bold">
+            <HistoryIcon size={18} /> Geçmiş Mailler
+          </div>
+          
+          <div className="flex flex-col gap-3">
+            {histLoading ? (
+              <div className="py-8 flex justify-center text-slate-300">
+                <Loader2 size={24} className="animate-spin" />
               </div>
-              <h2 className="text-base font-semibold text-slate-800">Generated Email Draft</h2>
-              {orgName && (
-                <span className="text-xs text-slate-400 font-normal ml-1">— {orgName}</span>
-              )}
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleCopy}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold
-                           bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition-all"
-              >
-                {copied ? <Check size={13} /> : <Copy size={13} />}
-                {copied ? "Copied!" : "Copy Email"}
-              </button>
-              <button
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold
-                           border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
-              >
-                <Eye size={13} />
-                View Source
-              </button>
-              <button
-                onClick={handleDiscard}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold
-                           border border-red-200 text-red-500 hover:bg-red-50 transition-all"
-              >
-                <Trash2 size={13} />
-                Discard
-              </button>
-            </div>
+            ) : recentApps.length === 0 ? (
+              <p className="text-sm text-slate-500 text-center py-6">Henüz mail üretmediniz.</p>
+            ) : (
+              recentApps.map((app) => (
+                <div key={app.id} className="p-3 border border-slate-100 rounded-2xl hover:border-indigo-100 hover:bg-indigo-50/30 transition-colors flex gap-3 items-start cursor-pointer group">
+                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-500 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-110 transition-transform">
+                    <Mail size={14} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-slate-800 truncate">
+                      {app.role || "Genel Başvuru"}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5 truncate">{app.organization_name}</p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[10px] font-bold rounded-md">
+                        {fmt(app.created_at).split(" ")[0]}
+                      </span>
+                      <StatusBadge status={app.status} className="scale-[0.8] origin-left" />
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
-          {/* Success feedback */}
-          {savedFeedback && (
-            <div className="mb-4 flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">
-              <CheckCircle2 size={15} />
-              {savedFeedback}
-            </div>
-          )}
-          {error && draft && (
-            <div className="mb-4 flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
-              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {/* Email textarea */}
-          <textarea
-            id="email-body"
-            value={emailText}
-            onChange={(e) => setEmailText(e.target.value)}
-            spellCheck
-            rows={16}
-            className="w-full px-4 py-3.5 rounded-xl bg-slate-50 border border-slate-200
-                       text-sm text-slate-800 font-mono leading-relaxed resize-none
-                       outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400
-                       transition-all"
-          />
-
-          {/* Save row */}
-          <div className="mt-4 flex items-center gap-3">
-            <button
-              id="save-btn"
-              onClick={handleSave}
-              disabled={saving || !emailText?.trim()}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
-                         bg-emerald-600 text-white hover:bg-emerald-700
-                         disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-            >
-              {saving
-                ? <><Loader2 size={14} className="animate-spin" /> Saving…</>
-                : <><CheckCircle2 size={14} /> Save to History</>
-              }
-            </button>
-            <button
-              onClick={handleGenerate}
-              disabled={loading}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
-                         border border-slate-200 text-slate-600 hover:bg-slate-50
-                         disabled:opacity-50 transition-all"
-            >
-              <RefreshCw size={14} />
-              Regenerate
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Widget D — Application History Table ─────────────────────────── */}
-      <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.06)] border border-slate-100 overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center">
-              <HistoryIcon size={14} className="text-slate-500" />
-            </div>
-            <h2 className="text-base font-semibold text-slate-800">Application History</h2>
-          </div>
-          <span className="text-xs text-slate-400 font-medium">
-            {apps.length} record{apps.length !== 1 ? "s" : ""}
-          </span>
+          <button 
+            onClick={onViewHistory}
+            className="w-full mt-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-indigo-600 text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1"
+          >
+            Tüm Geçmişi Gör <ChevronRight size={14} />
+          </button>
         </div>
 
-        {/* Table */}
-        {histLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={20} className="animate-spin text-slate-400" />
+        {/* Tip Card */}
+        <div className="card p-5 bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-100 shadow-sm shadow-emerald-100/50">
+          <div className="flex items-center gap-2 text-emerald-700 mb-2 font-bold">
+            <span className="text-xl leading-none">💡</span> İpucu
           </div>
-        ) : histError ? (
-          <div className="flex items-center gap-2 mx-6 my-5 p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm">
-            <AlertTriangle size={15} /> {histError}
+          <p className="text-sm font-medium text-emerald-800/80 leading-relaxed mb-4">
+            Daha iyi sonuçlar için CV'nizi yükleyin veya şirket/ilan linkini ekleyin. Yapay zeka bu verileri kullanarak en uygun maili yazar.
+          </p>
+          <div className="flex justify-center mt-2 relative">
+             <div className="w-24 h-24 bg-white rounded-2xl shadow-sm border border-emerald-100 flex items-center justify-center relative z-10 rotate-[-5deg]">
+               <Mail size={40} className="text-emerald-300" strokeWidth={1.5} />
+             </div>
+             <div className="w-20 h-20 bg-emerald-100 rounded-2xl absolute -right-2 top-2 z-0 rotate-[10deg]" />
           </div>
-        ) : apps.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-            <Mail size={32} className="mb-3 opacity-30" />
-            <p className="text-sm">No applications yet. Generate your first one!</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/70">
-                  {["Organization URL", "Role", "Date Generated", "Status", "Actions"].map((h) => (
-                    <th key={h} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-5 py-3">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {apps.slice(0, 8).map((a, idx) => (
-                  <tr
-                    key={a.id}
-                    className={`border-b border-slate-50 hover:bg-slate-50/80 transition-colors
-                      ${idx % 2 === 0 ? "" : "bg-slate-50/30"}`}
-                  >
-                    <td className="px-5 py-3.5 max-w-[220px]">
-                      <a
-                        href={a.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-800 hover:underline font-medium truncate block"
-                        title={a.url}
-                      >
-                        {truncate(a.organization_name || a.url, 40)}
-                      </a>
-                    </td>
-                    <td className="px-5 py-3.5 text-slate-600">
-                      {a.role || <span className="text-slate-300 italic">—</span>}
-                    </td>
-                    <td className="px-5 py-3.5 text-slate-500 text-xs whitespace-nowrap">
-                      {fmt(a.created_at)}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <StatusBadge status={a.status} />
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <button
-                          title="Edit"
-                          onClick={(e) => { e.stopPropagation(); setSelectedApp(a); }}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          title="Delete"
-                          onClick={(e) => handleDelete(a.id, e)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        </div>
+
       </div>
     </div>
   );

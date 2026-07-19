@@ -50,6 +50,15 @@ export function HistoryView({ refreshKey }) {
     } catch { /* silent */ }
   }
 
+  async function handleStatusChange(id, newStatus) {
+    try {
+      await api.updateApplication(id, { status: newStatus });
+      setApps((prev) => prev.map(a => a.id === id ? { ...a, status: newStatus } : a));
+    } catch (err) {
+      setError("Failed to update status: " + err.message);
+    }
+  }
+
   if (selected) {
     return (
       <ApplicationDetail
@@ -80,6 +89,21 @@ export function HistoryView({ refreshKey }) {
           <h1 className="text-xl font-bold text-slate-800">Application History</h1>
           <p className="text-sm text-slate-400 mt-0.5">{apps.length} record{apps.length !== 1 ? "s" : ""} total</p>
         </div>
+      </div>
+
+      {/* Dashboard Panel */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        {[
+          { label: "Toplam Başvuru", count: apps.length, color: "from-pink-400 to-rose-400" },
+          { label: "Gönderilen", count: apps.filter(a => a.status === "sent").length, color: "from-purple-400 to-indigo-400" },
+          { label: "Onaylanan", count: apps.filter(a => a.status === "accepted").length, color: "from-fuchsia-400 to-pink-500" },
+          { label: "Reddedilen", count: apps.filter(a => a.status === "rejected").length, color: "from-rose-500 to-red-500" },
+        ].map((stat, i) => (
+          <div key={i} className={`p-4 rounded-3xl shadow-lg bg-gradient-to-br ${stat.color} text-white flex flex-col justify-center items-center transform hover:scale-105 transition-transform`}>
+            <span className="text-3xl font-black drop-shadow-md">{stat.count}</span>
+            <span className="text-sm font-medium opacity-90">{stat.label}</span>
+          </div>
+        ))}
       </div>
 
       {/* Filter bar */}
@@ -184,7 +208,17 @@ export function HistoryView({ refreshKey }) {
                       {fmt(a.created_at)}
                     </td>
                     <td className="px-5 py-4">
-                      <StatusBadge status={a.status} />
+                      <select
+                        value={a.status}
+                        onChange={(e) => handleStatusChange(a.id, e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-white border-2 border-pink-200 text-pink-600 font-bold rounded-full px-3 py-1 text-xs outline-none focus:ring-2 focus:ring-pink-400 shadow-sm transition-all cursor-pointer hover:bg-pink-50"
+                      >
+                        <option value="draft">Draft</option>
+                        <option value="sent">Gönderildi (Sent)</option>
+                        <option value="accepted">Onaylandı (Approved)</option>
+                        <option value="rejected">Reddedildi (Rejected)</option>
+                      </select>
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
